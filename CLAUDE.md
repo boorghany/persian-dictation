@@ -17,6 +17,13 @@ Personal use only; the APK is sideloaded, never published.
 - **Bump the version, not just the build number**, for every change you ship: minor (0.x → 0.x+1) for
   fixes and features, major for big changes. Mac: `CFBundleShortVersionString` in `Resources/Info.plist`;
   Android: `versionName` in `android/app/build.gradle*`. The build scripts only bump the build number.
+- **Commit every change** to the local git repo (branch `main`, created 2026-10-08) after it builds and its
+  tests/replays pass: one commit per change, message says what and why, version in the subject when bumped.
+  Build output, APKs (`android/dist/`), `local.properties` and caches are git-ignored.
+- **The user plans to publish this on GitHub later.** Keep secrets and personal data out of commits. Before
+  the first push, review with the user: `testdata/recordings/*.wav` are the user's own voice and dictated
+  text; this file mentions their phone, location/VPN and headset; the Chromium key is public but unofficial
+  use of Google's endpoint should be explained in a README; add a LICENSE.
 - **Development mode stays on** while testing (verbose log + a WAV recording of every Google session).
 - To debug a recognition problem: find the session's recording, **replay it** (see Testing), reproduce,
   fix, then rerun the regression set. Measure before guessing — every workaround below came from logs.
