@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Microphone with right-to-left text lines: same geometry as AppIcon.drawGlyph on the Mac,
+     in a 44dp box at (32, 32) of the 108dp adaptive icon. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- capsule -->
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M58.4,43.44 A4.4,4.4 0 0 1 67.2,43.44 V52.24 A4.4,4.4 0 0 1 58.4,52.24 Z" />
+    <!-- holder, stem, base -->
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="2.42" android:strokeLineCap="round"
+        android:pathData="M55.1,51.36 A7.7,7.7 0 0 0 70.5,51.36 M62.8,59.06 V65.44 M58.4,65.44 H67.2" />
+    <!-- text lines: right-aligned, ragged on the left -->
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="3.08" android:strokeLineCap="round"
+        android:pathData="M37.94,45.2 H48.06 M41.46,51.8 H48.06 M39.26,58.4 H48.06" />
+</vector>

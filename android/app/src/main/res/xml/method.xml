@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A voice-only input method used next to Gboard: no subtypes, so it shows up as one entry
+     in the system keyboard picker. -->
+<input-method xmlns:android="http://schemas.android.com/apk/res/android"
+    android:settingsActivity="local.voice2text.persiandictation.SetupActivity"
+    android:supportsSwitchingToNextInputMethod="false" />

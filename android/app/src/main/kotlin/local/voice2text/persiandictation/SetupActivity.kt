@@ -1,0 +1,138 @@
+package local.voice2text.persiandictation
+
+import android.app.Activity
+import android.content.Intent
+import android.graphics.Typeface
+import android.os.Bundle
+import android.provider.Settings as AndroidSettings
+import android.text.InputType
+import android.view.Gravity
+import android.view.View
+import android.view.WindowInsets
+import android.view.inputmethod.InputMethodManager
+import android.widget.Button
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.Switch
+import android.widget.TextView
+
+/** Launcher screen: microphone permission, enabling the keyboard, how to use it, development mode. */
+class SetupActivity : Activity() {
+    private lateinit var micStatus: TextView
+    private lateinit var micButton: Button
+    private lateinit var keyboardStatus: TextView
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        actionBar?.hide() // the screen has its own heading
+        AppLog.init(this)
+        val dp = resources.displayMetrics.density
+        fun pad(v: Int) = (v * dp).toInt()
+
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad(20), pad(20), pad(20), pad(32))
+        }
+        fun heading(text: String) = TextView(this).apply {
+            this.text = text
+            textSize = 18f
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, pad(24), 0, pad(6))
+        }
+        fun body(text: String = "") = TextView(this).apply {
+            this.text = text
+            textSize = 15f
+            setLineSpacing(0f, 1.2f)
+        }
+
+        column.addView(TextView(this).apply {
+            text = getString(R.string.app_name)
+            textSize = 26f
+            setTypeface(typeface, Typeface.BOLD)
+        })
+        column.addView(body("Version ${versionDisplay(this)}"))
+
+        column.addView(heading("1. Microphone"))
+        micStatus = body()
+        column.addView(micStatus)
+        micButton = Button(this).apply {
+            text = "Allow microphone"
+            setOnClickListener { requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 1) }
+        }
+        column.addView(micButton)
+
+        column.addView(heading("2. Turn on the keyboard"))
+        keyboardStatus = body()
+        column.addView(keyboardStatus)
+        column.addView(Button(this).apply {
+            text = "Open keyboard settings"
+            setOnClickListener { startActivity(Intent(AndroidSettings.ACTION_INPUT_METHOD_SETTINGS)) }
+        })
+
+        column.addView(heading("3. Use it"))
+        column.addView(body(
+            "Keep Gboard as your keyboard. To dictate, switch keyboards with one tap: the keyboard icon at " +
+            "the bottom of the screen, or a long press on Gboard's space bar, then pick Persian Dictation. " +
+            "It starts listening right away.\n\n" +
+            "✓ inserts the last sentence and goes back to Gboard. ⏎ does the same and presses Enter. " +
+            "⌨ goes back without waiting. Tap the mic to pause or resume. ⌫ pauses and deletes " +
+            "(hold it to keep deleting).\n\n" +
+            // Isolate each Persian word so it doesn't reorder the English sentence around it.
+            "Say ${listOf("نقطه", "ویرگول", "علامت سوال", "دو نقطه").joinToString(", ") { "\u2068«$it»\u2069" }} " +
+            ", \u2068«خط بعد»\u2069 (new line) or \u2068«پاراگراف بعد»\u2069 (new paragraph) for punctuation."))
+        column.addView(Button(this).apply {
+            text = "Switch keyboard now"
+            setOnClickListener { (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker() }
+        })
+        val tryField = EditText(this).apply {
+            hint = "Try it here"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            minLines = 3
+            gravity = Gravity.TOP or Gravity.START
+        }
+        column.addView(tryField)
+
+        column.addView(heading("Development mode"))
+        column.addView(Switch(this).apply {
+            text = "Log recognizer results and record audio"
+            isChecked = Settings.developmentMode(this@SetupActivity)
+            setOnCheckedChangeListener { _, on ->
+                Settings.setDevelopmentMode(this@SetupActivity, on)
+                AppLog.write("developmentMode=$on")
+            }
+        })
+        column.addView(body("Logs and recordings: Android/data/$packageName/files"))
+        column.addView(Button(this).apply {
+            text = "Share diagnostics"
+            setOnClickListener { DiagnosticsDialog.show(this@SetupActivity) }
+        })
+        column.addView(body("Zips the log and recent recordings (you choose how many hours) and opens the share sheet."))
+
+        val scroll = ScrollView(this).apply { addView(column) }
+        // Edge-to-edge (Android 15): keep content clear of the status bar, navigation bar and keyboard.
+        scroll.setOnApplyWindowInsetsListener { v, insets ->
+            val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.ime())
+            v.setPadding(0, bars.top, 0, bars.bottom)
+            if (tryField.hasFocus()) v.post { scroll.smoothScrollTo(0, tryField.bottom) }
+            WindowInsets.CONSUMED
+        }
+        setContentView(scroll)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val mic = hasMicPermission(this)
+        micStatus.text = if (mic) "✓ Microphone allowed" else "✗ Microphone not allowed yet"
+        micButton.visibility = if (mic) View.GONE else View.VISIBLE
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+        val enabled = imm.enabledInputMethodList.any { it.packageName == packageName }
+        keyboardStatus.text = if (enabled) "✓ Persian Dictation is turned on"
+                              else "✗ Turn on “Persian Dictation” in the list (Android will show a standard warning for any new keyboard)."
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        onResume()
+    }
+}
