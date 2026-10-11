@@ -4,9 +4,11 @@ import AppKit
 /// Desktop (Space). The user asked for one box on the main display rather than one per display.
 /// The box never takes focus, so the app the user is dictating into stays active.
 final class OverlayPanel {
-    private let window = OverlayWindow()
+    private var window = OverlayWindow()
     private var isShown = false
     private var text = ""
+    private var busy = false
+    private var level: Float = 0
     private var observers: [NSObjectProtocol] = []
 
     init() {
@@ -23,7 +25,10 @@ final class OverlayPanel {
         let first = !isShown
         isShown = true
         if let screen = NSScreen.screens.first { window.show(text, on: screen) }
-        if first { logPlacement("overlay show") }
+        if first {
+            logPlacement("overlay show")
+            ensureOnActiveSpace()
+        }
     }
 
     func hide() {
@@ -33,24 +38,43 @@ final class OverlayPanel {
 
     /// Scale the recording dot with the microphone level (0...1).
     func setLevel(_ level: Float) {
+        self.level = level
         window.setLevel(level)
     }
 
     func setBusy(_ busy: Bool) {
+        self.busy = busy
         window.setBusy(busy)
     }
 
+    /// A display was connected or disconnected. macOS then moves the window and can drop its
+    /// "all Desktops" membership (seen after unplugging the external monitor: the window was on
+    /// one Desktop only, and ordering it front again didn't bring it back). A new window is fine.
     private func screensChanged() {
-        if isShown, let screen = NSScreen.screens.first { window.show(text, on: screen) }
+        recreateWindow(reason: "displays changed")
     }
 
-    /// `.canJoinAllSpaces` should already keep the box on every Desktop; if it still isn't on the
-    /// Desktop the user switched to, show it again there.
+    /// `.canJoinAllSpaces` should keep the box on every Desktop; if it still isn't on the one the
+    /// user switched to, replace the window.
     private func spaceChanged() {
         guard isShown else { return }
-        let missing = !window.isOnActiveSpace
-        if missing { window.orderFrontRegardless() }
-        logPlacement("overlay space changed, reshown=\(missing)")
+        logPlacement("overlay space changed")
+        ensureOnActiveSpace()
+    }
+
+    private func ensureOnActiveSpace() {
+        guard isShown, !window.isOnActiveSpace else { return }
+        recreateWindow(reason: "was not on the current Desktop")
+    }
+
+    private func recreateWindow(reason: String) {
+        let old = window
+        window = OverlayWindow()
+        window.setBusy(busy)
+        window.setLevel(level)
+        old.orderOut(nil)
+        if isShown, let screen = NSScreen.screens.first { window.show(text, on: screen) }
+        logPlacement("overlay recreated (\(reason))")
     }
 
     private func logPlacement(_ event: String) {
