@@ -16,7 +16,7 @@ final class DictationController {
     private var audio: AudioCapture?
     private var recognizer: ContinuousRecognizer?
     private var insertedAny = false
-    private var lastInsertEndedWithNewline = false
+    private var lastInsertAttachesToNext = false
     private var finishTimeout: DispatchWorkItem?
     private var dictationStart = Date()
     private var gotFirstAudio = false
@@ -58,7 +58,7 @@ final class DictationController {
 
     private func begin() {
         insertedAny = false
-        lastInsertEndedWithNewline = false
+        lastInsertAttachesToNext = false
         dictationStart = Date()
         gotFirstAudio = false
         let mics = AudioCapture.microphones().map(\.localizedName).joined(separator: ", ")
@@ -160,10 +160,10 @@ final class DictationController {
     private func insert(_ raw: String) {
         let text = SpokenPunctuation.apply(Corrections.apply(raw, language: language), language: language)
         guard !text.isEmpty else { return }
-        let needsSpace = insertedAny && !lastInsertEndedWithNewline && !SpokenPunctuation.attachesToPrevious(text)
+        let needsSpace = insertedAny && !lastInsertAttachesToNext && !SpokenPunctuation.attachesToPrevious(text)
         TextInserter.insert(needsSpace ? " " + text : text)
         insertedAny = true
-        lastInsertEndedWithNewline = text.hasSuffix("\n")
+        lastInsertAttachesToNext = SpokenPunctuation.attachesToNext(text)
     }
 
     // MARK: Accessibility

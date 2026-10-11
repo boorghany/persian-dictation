@@ -13,13 +13,16 @@ object SpokenPunctuation {
         "علامت سؤال" to "؟",
         "خط بعد" to "\n",
         "خط بد" to "\n", // Google often hears «بعد» as «بد»
+        "پرانتز باز" to "(",
+        "پرانتز بسته" to ")",
         "دو نقطه" to ":",
         "دونقطه" to ":",
         "نقطه" to ".",
         "ویرگول" to "،",
     )
 
-    private const val SYMBOLS = ".،؟:"
+    /** Attach to the previous word: no space before, one after when a word follows. */
+    private const val SYMBOLS = ".،؟:)"
 
     // A "word" here can contain letters, combining marks and ZWNJ, so "نقطه‌ی" is left alone.
     private const val NOT_WORD_BEFORE = "(?<![\\p{L}\\p{M}\\u200C])"
@@ -36,6 +39,9 @@ object SpokenPunctuation {
         return first in SYMBOLS || first == '\n'
     }
 
+    /** Text ending like this attaches to whatever comes next, so no space goes after it. */
+    fun attachesToNext(text: String) = text.endsWith('\n') || text.endsWith('(')
+
     fun apply(text: String, language: String): String {
         if (!language.startsWith("fa")) return text
         var s = text
@@ -44,6 +50,9 @@ object SpokenPunctuation {
         s = s.replace(Regex("[ \\t]+([$SYMBOLS])"), "$1")
         // One space after punctuation when a word follows (but leave decimals like 3.5 alone).
         s = s.replace(Regex("([$SYMBOLS])(?=\\p{L})"), "$1 ")
+        // "(" attaches to the next word: a space before it (unless at the start), none after.
+        s = s.replace(Regex("\\([ \\t]+"), "(")
+        s = s.replace(Regex("(?<=[^\\s(])\\("), " (")
         // No spaces around line breaks.
         s = s.replace(Regex("[ \\t]*\\n[ \\t]*"), "\n")
         return s.trim(' ', '\t')

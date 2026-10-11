@@ -297,7 +297,7 @@ class VoiceInputService : InputMethodService() {
     /** Whether the committed text right before the cursor needs a separating space. */
     private fun needsSpaceBefore(): Boolean {
         val before = currentInputConnection?.getTextBeforeCursor(1, 0)
-        return !before.isNullOrEmpty() && !before.last().isWhitespace()
+        return !before.isNullOrEmpty() && !before.last().isWhitespace() && before.last() != '('
     }
 
     /**

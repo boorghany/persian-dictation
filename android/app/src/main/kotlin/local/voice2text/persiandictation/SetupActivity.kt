@@ -79,7 +79,7 @@ class SetupActivity : Activity() {
             "⌨ goes back without waiting. Tap the mic to pause or resume. ⌫ pauses and deletes " +
             "(hold it to keep deleting).\n\n" +
             // Isolate each Persian word so it doesn't reorder the English sentence around it.
-            "Say ${listOf("نقطه", "ویرگول", "علامت سوال", "دو نقطه").joinToString(", ") { "\u2068«$it»\u2069" }} " +
+            "Say ${listOf("نقطه", "ویرگول", "علامت سوال", "دو نقطه", "پرانتز باز", "پرانتز بسته").joinToString(", ") { "\u2068«$it»\u2069" }} " +
             ", \u2068«خط بعد»\u2069 (new line) or \u2068«پاراگراف بعد»\u2069 (new paragraph) for punctuation."))
         column.addView(Button(this).apply {
             text = "Switch keyboard now"

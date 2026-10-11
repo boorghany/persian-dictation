@@ -21,6 +21,11 @@ class SpokenPunctuationTest {
         "ساعت 10:30 است" to "ساعت 10:30 است",
         "دو تا سیب" to "دو تا سیب",
         "دو نقطه‌ی مهم" to "دو نقطه‌ی مهم",
+        "این پرانتز باز مثلاً پرانتز بسته خوبه" to "این (مثلاً) خوبه",
+        "پرانتز باز سلام" to "(سلام",
+        "سلام پرانتز بسته نقطه" to "سلام).",
+        "سلام پرانتز باز" to "سلام (",
+        "پرانتز بسته" to ")",
         "پاراگراف اول پاراگراف بعد پاراگراف دوم" to "پاراگراف اول\n\nپاراگراف دوم",
         "تموم شد نقطه پاراگراف بد سلام" to "تموم شد.\n\nسلام",
     )
@@ -30,6 +35,14 @@ class SpokenPunctuationTest {
     }
 
     @Test fun englishUntouched() = assertEquals("hello period", SpokenPunctuation.apply("hello period", "en-US"))
+}
+
+class AttachesToNextTest {
+    @Test fun cases() {
+        assertEquals(true, SpokenPunctuation.attachesToNext("سلام ("))
+        assertEquals(true, SpokenPunctuation.attachesToNext("سلام\n"))
+        assertEquals(false, SpokenPunctuation.attachesToNext("سلام)"))
+    }
 }
 
 class CorrectionsTest {

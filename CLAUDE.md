@@ -90,8 +90,10 @@ All found from real recordings; the Android `core` module is a line-by-line port
 6. **Spoken punctuation** (`SpokenPunctuation`, Persian only), longest phrase first, whole words only
    ("نقطه‌ی" untouched): علامت سوال / علامت سؤال → `؟`, پاراگراف بعد / پاراگراف بد → two newlines,
    خط بعد / خط بد (Google mishears بعد) → newline,
-   دو نقطه / دونقطه → `:`, نقطه → `.`, ویرگول → `،`. No space before symbols, one after if a word follows
-   (decimals and times like 10:30 untouched), no spaces around newlines.
+   دو نقطه / دونقطه → `:`, نقطه → `.`, ویرگول → `،`, پرانتز باز → `(`, پرانتز بسته → `)`. No space before
+   symbols (incl. `)`), one after if a word follows (decimals and times like 10:30 untouched); `(` gets a space
+   before and none after; no spaces around newlines. `attachesToNext` (text ending in `(` or a newline): the
+   next final gets no leading space (Mac `lastInsertAttachesToNext`, Android `needsSpaceBefore`).
    Known gaps: literal "خط بد" becomes a newline; "۲ نقطه" written with a digit isn't converted.
 
 ## macOS app (repo root)
