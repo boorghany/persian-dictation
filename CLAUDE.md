@@ -14,6 +14,9 @@ Personal use only; the APK is sideloaded, never published.
 
 - After every code change, **build, install and launch it yourself** — don't ask the user to reinstall —
   then tell them the **build number** (shown in the Mac menu-bar menu / Android keyboard panel).
+- **Android builds only when the user asks** (2026-10-11): don't run `android/build.sh` for every change.
+  Still port shared-engine changes to `android/core` and check them with the core tests / replay tool. When
+  asked for a build, set the Android `versionName` to the current Mac version, build, and reveal the APK.
 - **Bump the version, not just the build number**, for every change you ship: minor (0.x → 0.x+1) for
   fixes and features, major for big changes. Mac: `CFBundleShortVersionString` in `Resources/Info.plist`;
   Android: `versionName` in `android/app/build.gradle*`. The build scripts only bump the build number.
