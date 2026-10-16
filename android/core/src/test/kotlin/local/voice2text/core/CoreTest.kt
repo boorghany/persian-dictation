@@ -53,6 +53,7 @@ class CorrectionsTest {
         assertEquals("طول و عرض جدول", Corrections.apply("طول و ارز جدول", "fa-IR"))
         assertEquals("نوار عرضی", Corrections.apply("نوار ارزی", "fa-IR"))
         assertEquals("ارزش", Corrections.apply("ارزش", "fa-IR"))
+        assertEquals("آقای بورقانی", Corrections.apply("آقای بورغانی", "fa-IR"))
     }
 
     @Test fun englishUntouched() = assertEquals("عرشیا", Corrections.apply("عرشیا", "en-US"))

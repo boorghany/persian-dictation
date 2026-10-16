@@ -12,6 +12,7 @@ object Corrections {
     /** Longer phrases first so they win over any shorter phrase they contain. */
     private val persian = listOf(
         "عرشیا" to "ارشیا",
+        "بورغانی" to "بورقانی",
         "ارزی" to "عرضی",
         "ارز" to "عرض",
     )

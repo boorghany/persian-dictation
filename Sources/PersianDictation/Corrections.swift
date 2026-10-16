@@ -7,6 +7,7 @@ enum Corrections {
     /// Longer phrases first so they win over any shorter phrase they contain.
     private static let persian: [(heard: String, written: String)] = [
         ("عرشیا", "ارشیا"),
+        ("بورغانی", "بورقانی"),
         ("ارزی", "عرضی"),
         ("ارز", "عرض"),
     ]
