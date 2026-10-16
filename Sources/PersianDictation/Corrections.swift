@@ -7,6 +7,8 @@ enum Corrections {
     /// Longer phrases first so they win over any shorter phrase they contain.
     private static let persian: [(heard: String, written: String)] = [
         ("عرشیا", "ارشیا"),
+        ("ارزی", "عرضی"),
+        ("ارز", "عرض"),
     ]
 
     static func apply(_ text: String, language: String) -> String {

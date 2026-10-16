@@ -89,7 +89,7 @@ All found from real recordings; the Android `core` module is a line-by-line port
    errors → stop and show "can't reach Google… check VPN".
 5. **Corrections list** (`Corrections`, Persian only, separate from punctuation and applied before it, to
    preview and final): fixed whole-word replacements for words Google writes differently from how the user
-   wants them — currently عرشیا → ارشیا (a name). Add new entries to both `Corrections.swift` and `.kt`.
+   wants them — currently عرشیا → ارشیا (a name), ارز → عرض, ارزی → عرضی (the user means width, never currency). Add new entries to both `Corrections.swift` and `.kt`.
 6. **Spoken punctuation** (`SpokenPunctuation`, Persian only), longest phrase first, whole words only
    ("نقطه‌ی" untouched): علامت سوال / علامت سؤال → `؟`, پاراگراف بعد / پاراگراف بد → two newlines,
    خط بعد / خط بد (Google mishears بعد) → newline,

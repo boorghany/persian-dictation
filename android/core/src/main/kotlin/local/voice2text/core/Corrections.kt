@@ -12,6 +12,8 @@ object Corrections {
     /** Longer phrases first so they win over any shorter phrase they contain. */
     private val persian = listOf(
         "عرشیا" to "ارشیا",
+        "ارزی" to "عرضی",
+        "ارز" to "عرض",
     )
 
     // A "word" here can contain letters, combining marks and ZWNJ (same rule as SpokenPunctuation).

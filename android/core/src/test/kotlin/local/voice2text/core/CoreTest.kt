@@ -50,6 +50,9 @@ class CorrectionsTest {
         assertEquals("سلام ارشیا", Corrections.apply("سلام عرشیا", "fa-IR"))
         assertEquals("ارشیا. خوبی", SpokenPunctuation.apply(Corrections.apply("عرشیا نقطه خوبی", "fa-IR"), "fa-IR"))
         assertEquals("عرشیاها", Corrections.apply("عرشیاها", "fa-IR")) // whole words only
+        assertEquals("طول و عرض جدول", Corrections.apply("طول و ارز جدول", "fa-IR"))
+        assertEquals("نوار عرضی", Corrections.apply("نوار ارزی", "fa-IR"))
+        assertEquals("ارزش", Corrections.apply("ارزش", "fa-IR"))
     }
 
     @Test fun englishUntouched() = assertEquals("عرشیا", Corrections.apply("عرشیا", "en-US"))
