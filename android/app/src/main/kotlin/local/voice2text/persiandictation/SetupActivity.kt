@@ -54,6 +54,18 @@ class SetupActivity : Activity() {
         column.addView(body("Version ${versionDisplay(this)}"))
 
         column.addView(heading("1. Microphone"))
+        // Privacy notice before the permission request (Cafe Bazaar requires it for private data).
+        column.addView(body(
+            "While the keyboard is listening, your voice is sent to Google's speech recognition service " +
+            "to turn it into text. The app doesn't store your voice or text and sends them nowhere else " +
+            "(unless you turn on development mode below, which saves them only on this phone)."))
+        column.addView(body(
+            "وقتی صفحه‌کلید در حال گوش دادن است، صدای شما برای تبدیل به متن به سرویس تشخیص گفتار گوگل " +
+            "فرستاده می‌شود. برنامه صدا یا متن شما را ذخیره نمی‌کند و به جای دیگری نمی‌فرستد " +
+            "(مگر حالت توسعه را در پایین همین صفحه روشن کنید که آن‌ها را فقط روی همین گوشی ذخیره می‌کند).").apply {
+            textDirection = android.view.View.TEXT_DIRECTION_RTL
+            setPadding(0, pad(8), 0, 0)
+        })
         micStatus = body()
         column.addView(micStatus)
         micButton = Button(this).apply {

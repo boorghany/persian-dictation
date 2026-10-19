@@ -19,12 +19,12 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        // Published on Cafe Bazaar under this id (0.18.0); the code's package stays local.voice2text.
+        // Published on Cafe Bazaar under this id (0.18.0+); the code's package stays local.voice2text.
         applicationId = "ir.boorghany.persiandictation"
         minSdk = 28 // InputMethodService.switchToPreviousInputMethod()
         targetSdk = 35
         versionCode = buildNumber
-        versionName = "0.18.0"
+        versionName = "0.19.0"
     }
 
     signingConfigs {
