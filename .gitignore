@@ -1,3 +1,6 @@
 .build/
 build.noindex/
 .DS_Store
+
+# Release signing key for Cafe Bazaar: never commit, back it up (losing it means no more updates).
+android/signing/

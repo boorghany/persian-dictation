@@ -74,12 +74,11 @@ class SetupActivity : Activity() {
         column.addView(body(
             "Keep Gboard as your keyboard. To dictate, switch keyboards with one tap: the keyboard icon at " +
             "the bottom of the screen, or a long press on Gboard's space bar, then pick Persian Dictation. " +
-            "It starts listening right away.\n\n" +
-            "✓ inserts the last sentence and goes back to Gboard. ⏎ does the same and presses Enter. " +
-            "⌨ goes back without waiting. Tap the mic to pause or resume. ⌫ pauses and deletes " +
-            "(hold it to keep deleting).\n\n" +
+            "Tap the mic to start listening, and again to pause.\n\n" +
+            "⌨ goes back to Gboard. ⌫ deletes a whole word, ◀ ▶ move the cursor by words " +
+            "(hold them to repeat).\n\n" +
             // Isolate each Persian word so it doesn't reorder the English sentence around it.
-            "Say ${listOf("نقطه", "ویرگول", "علامت سوال", "دو نقطه", "پرانتز باز", "پرانتز بسته").joinToString(", ") { "\u2068«$it»\u2069" }} " +
+            "Say ${listOf("نقطه", "ویرگول", "علامت سوال", "دو نقطه", "پرانتز باز", "پرانتز بسته").joinToString(", ") { "\u2068«$it»\u2069" }}" +
             ", \u2068«خط بعد»\u2069 (new line) or \u2068«پاراگراف بعد»\u2069 (new paragraph) for punctuation."))
         column.addView(Button(this).apply {
             text = "Switch keyboard now"

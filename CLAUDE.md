@@ -8,7 +8,7 @@ share one design:
 - **Android** (Kotlin, `android/`): a voice-only keyboard (IME) used *next to* Gboard, so Gboard's swipe
   typing and clipboard history stay available. The user's phone: Xiaomi Poco X6 Pro, latest HyperOS.
 
-Personal use only; the APK is sideloaded, never published.
+Personal use at first; since 2026-10-19 the Android app is also being published on **Cafe Bazaar** (see below).
 
 ## Working agreements
 
@@ -193,15 +193,25 @@ it's set before the first layout (decor insets or `navigation_bar_height`) and c
 changes (log `navigation bar inset A → B`). Unconfirmed fix — ask for a screenshot if it happens again.
 `method.xml` declares no subtypes so it is one entry in the keyboard picker.
 
-Dev mode (switch in the setup screen, default off, confirmation dialog before turning on): `Android/data/local.voice2text.persiandictation/files/`
+Dev mode (switch in the setup screen, default off, confirmation dialog before turning on): `Android/data/ir.boorghany.persiandictation/files/`
 holds `PersianDictation.log` (+ connection traces) and `recordings/`. Test hook: if `test-input.wav`
 exists there, it is played instead of the microphone (used for emulator tests; delete it afterwards).
+
+**Cafe Bazaar** (2026-10-19, the user asked for it): developer account boorghany@gmail.com, developer title
+احمد بورقانی, draft app 225251 at pishkhan.cafebazaar.ir. Listing: name تایپ صوتی فارسی / Persian Dictation, category
+ابزارها, free, support email boorghany@gmail.com; texts say audio goes to Google only while listening and that it is not a
+Google product. `applicationId` is **`ir.boorghany.persiandictation`** (permanent once published; the Kotlin package /
+namespace stays `local.voice2text…`, so component names are `ir.boorghany.persiandictation/local.voice2text.persiandictation.X`).
+`android/build.sh --release` builds `dist/…-release.apk` signed with `android/signing/release.jks`
+(+ `keystore.properties` with the passwords; both git-ignored — **the user must back them up**, without them Bazaar
+won't take updates). Store assets in `android/store/` (512 px icon rendered from the Mac `AppIcon` code, emulator screenshots).
+Every Bazaar update needs a higher `versionCode` (= build number).
 
 Build & install: `android/build.sh` → bumps `android/build-number.txt`, runs core tests, builds
 `android/dist/PersianDictation-<versionName>-build<N>.apk`, and `adb install -r`s it if a device is connected.
 Emulator for smoke tests: AVD `pd35` (Android 15, Google APIs, has Gboard):
 `$ANDROID_HOME/emulator/emulator -avd pd35 -no-window -no-audio -no-snapshot -gpu swiftshader_indirect`,
-then `adb shell ime enable/set local.voice2text.persiandictation/.VoiceInputService`.
+then `adb shell ime enable/set ir.boorghany.persiandictation/local.voice2text.persiandictation.VoiceInputService`.
 
 Status (2026-10-07): build 3 passes all replays and an emulator end-to-end test (recording played in,
 text landed in the field with correct spacing/ZWNJ, ✓ returned to Gboard). 2026-10-08: the user has been

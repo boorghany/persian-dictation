@@ -1,5 +1,6 @@
 #!/bin/zsh
 # Builds the Android voice keyboard APK into dist/, and installs it if a phone is connected over adb.
+# `build.sh --release` builds the Cafe Bazaar APK instead (signed with signing/release.jks), not installed.
 set -euo pipefail
 
 ROOT="${0:A:h}"
@@ -13,11 +14,20 @@ BUILD_FILE="$ROOT/build-number.txt"
 BUILD=$(( $(cat "$BUILD_FILE" 2>/dev/null || echo 0) + 1 ))
 echo "$BUILD" > "$BUILD_FILE"
 
-./gradlew :core:test :app:assembleDebug -PbuildNumber="$BUILD" --console=plain -q
-
 VERSION_NAME=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kts)
 VERSION="$VERSION_NAME (build $BUILD)"
 mkdir -p dist
+
+if [[ "${1:-}" == "--release" ]]; then
+  [[ -f signing/keystore.properties ]] || { echo "Missing signing/keystore.properties (release key)"; exit 1; }
+  ./gradlew :core:test :app:assembleRelease -PbuildNumber="$BUILD" --console=plain -q
+  APK="dist/PersianDictation-$VERSION_NAME-build$BUILD-release.apk"
+  cp app/build/outputs/apk/release/app-release.apk "$APK"
+  echo "Built: $ROOT/$APK — version $VERSION (release, for Cafe Bazaar)"
+  exit 0
+fi
+
+./gradlew :core:test :app:assembleDebug -PbuildNumber="$BUILD" --console=plain -q
 APK="dist/PersianDictation-$VERSION_NAME-build$BUILD.apk"
 cp app/build/outputs/apk/debug/app-debug.apk "$APK"
 echo "Built: $ROOT/$APK — version $VERSION"
