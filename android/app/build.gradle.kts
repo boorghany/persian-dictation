@@ -15,7 +15,7 @@ android {
         minSdk = 28 // InputMethodService.switchToPreviousInputMethod()
         targetSdk = 35
         versionCode = buildNumber
-        versionName = "0.12.0"
+        versionName = "0.17.0"
     }
 
     compileOptions {

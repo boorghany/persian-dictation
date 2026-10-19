@@ -178,12 +178,19 @@ connections (HttpURLConnection, raw sockets) the up request could overtake the d
 sessions, false "freezes") and every session paid a VPN TLS handshake (sometimes 4–10 s). The up request
 starts only after OkHttp's `requestHeadersEnd` for the down request; `onConnected` feeds the watchdog.
 
-IME behaviour: starts listening as soon as it's shown; ⌫ always deletes — while listening or finishing it
-first pauses (types the last interim as is, cancels the recognizer); hold ⌫ to repeat; interim text is shown in the panel and as
-underlined composing text in the field; finals are committed with a space if the text before the cursor
-needs one. Buttons: 🎤 pause/resume, ⌨ back to Gboard immediately, ⌫ delete, ⏎ finish + Enter/editor
-action + back to Gboard, ✓ finish + back to Gboard (`switchToPreviousInputMethod`, falls back to the
-picker). Hiding the keyboard keeps the composing text and stops. Mic: `AudioRecord` VOICE_RECOGNITION.
+IME behaviour (0.17.0): opens **paused** — the user taps 🎤 to start (before: listened as soon as shown).
+Interim text is shown in the panel and as underlined composing text in the field; finals are committed with a
+space if the text before the cursor needs one. Keys: ⌨ back to Gboard immediately (`switchToPreviousInputMethod`,
+falls back to the picker), ⌫, ◀, ▶ (all hold to repeat, 150 ms). **⌫ deletes a whole word**: the word before the
+cursor, or the whole word the cursor is in, plus the spaces before it, keeping one space when words remain on
+both sides; a line break before the cursor alone; a selection as a whole. **◀ ▶ move by words** (Persian is RTL:
+▶ = back to the start of the previous word, ◀ = forward to the end of the next). While listening, these keys
+first pause (type the last interim as is, cancel the recognizer). Removed in 0.17.0: ⏎ (finish + Enter) and
+✓ (same as ⌨). Hiding the keyboard keeps the composing text and stops. Mic: `AudioRecord` VOICE_RECOGNITION.
+Half-open panel bug (keys cut off at the bottom, seen on the phone): the bottom padding for the navigation bar
+was set only when insets arrived, after the first layout, changing the keyboard's height while it slid in. Now
+it's set before the first layout (decor insets or `navigation_bar_height`) and changed only when the inset really
+changes (log `navigation bar inset A → B`). Unconfirmed fix — ask for a screenshot if it happens again.
 `method.xml` declares no subtypes so it is one entry in the keyboard picker.
 
 Dev mode (switch in the setup screen, default off, confirmation dialog before turning on): `Android/data/local.voice2text.persiandictation/files/`

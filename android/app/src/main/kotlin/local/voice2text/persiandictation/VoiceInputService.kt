@@ -14,6 +14,8 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.ExtractedTextRequest
+import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -23,9 +25,9 @@ import local.voice2text.core.SpeechStream
 import local.voice2text.core.SpokenPunctuation
 
 /**
- * A voice-only keyboard used next to Gboard. It starts listening as soon as it is shown, writes the
- * hypothesis in progress into the text field as composing (underlined) text, commits each finalized
- * utterance, and switches back to the previous keyboard (Gboard) when the user is done.
+ * A voice-only keyboard used next to Gboard. It opens paused; 🎤 starts listening. The hypothesis in
+ * progress goes into the text field as composing (underlined) text and each finalized utterance is
+ * committed. ⌫ deletes and ◀ ▶ move by whole words; ⌨ switches back to the previous keyboard (Gboard).
  */
 class VoiceInputService : InputMethodService() {
     private enum class State { IDLE, LISTENING, FINISHING }
@@ -46,6 +48,11 @@ class VoiceInputService : InputMethodService() {
     private lateinit var micButton: TextView
     private lateinit var micCircle: GradientDrawable
     private var dark = false
+    /** The field's selection, from onUpdateSelection: fallback when the app gives no extracted text. */
+    private var selStart = -1
+    private var selEnd = -1
+    /** Bottom padding that keeps the keys above the navigation bar. */
+    private var bottomInset = -1
 
     override fun onCreate() {
         super.onCreate()
@@ -93,9 +100,10 @@ class VoiceInputService : InputMethodService() {
             orientation = LinearLayout.HORIZONTAL
             setPadding(px(4), px(8), px(4), px(4))
             addView(key("⌨") { switchBack(waitForLastResult = false) })
-            addView(key("⌫") { backspace() }.apply { repeatWhileHeld(this) { backspace() } })
-            addView(key("⏎") { done(pressEnter = true) })
-            addView(key("✓") { done(pressEnter = false) })
+            addView(key("⌫") {}.apply { repeatWhileHeld(this) { backspace() } })
+            // Persian runs right to left: ▶ goes back to the previous word, ◀ forward to the next.
+            addView(key("◀") {}.apply { repeatWhileHeld(this) { moveWord(back = false) } })
+            addView(key("▶") {}.apply { repeatWhileHeld(this) { moveWord(back = true) } })
         }
         val version = TextView(this).apply {
             text = "Persian Dictation ${versionDisplay(this@VoiceInputService)}"
@@ -110,18 +118,44 @@ class VoiceInputService : InputMethodService() {
             addView(micButton, LinearLayout.LayoutParams(px(88), px(88)).apply { gravity = Gravity.CENTER_HORIZONTAL })
             addView(keys, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
             addView(version)
-            // Keep the keys above the navigation bar / gesture handle.
+            // Keep the keys above the navigation bar / gesture handle. The padding is set before the
+            // first layout and changed only when the inset really changes: when the keyboard's height
+            // changed while it was sliding in (the inset arrives after the first layout), it sometimes
+            // stopped half-way up, with the keys cut off at the bottom.
+            if (bottomInset < 0) bottomInset = navigationBarGuess()
+            setPadding(0, 0, 0, bottomInset + px(4))
             setOnApplyWindowInsetsListener { v, insets ->
                 val bottom = insets.getInsets(WindowInsets.Type.navigationBars()).bottom
-                v.setPadding(0, 0, 0, bottom + px(4))
+                if (bottom != bottomInset) {
+                    AppLog.write("navigation bar inset $bottomInset → $bottom")
+                    bottomInset = bottom
+                    v.setPadding(0, 0, 0, bottom + px(4))
+                }
                 insets
             }
         }.also { render() }
     }
 
+    /** The system's navigation bar height, the usual bottom inset, so the padding rarely changes later. */
+    private fun navigationBarGuess(): Int {
+        window?.window?.decorView?.rootWindowInsets?.let { return it.getInsets(WindowInsets.Type.navigationBars()).bottom }
+        val id = resources.getIdentifier("navigation_bar_height", "dimen", "android")
+        return if (id != 0) resources.getDimensionPixelSize(id) else 0
+    }
+
+    /** Opens paused: the user taps 🎤 to start. */
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
-        if (state == State.IDLE) startListening()
+        selStart = info?.initialSelStart ?: -1
+        selEnd = info?.initialSelEnd ?: -1
+        render()
+    }
+
+    override fun onUpdateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int,
+                                   candidatesStart: Int, candidatesEnd: Int) {
+        super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
+        selStart = newSelStart
+        selEnd = newSelEnd
     }
 
     /** The keyboard is hidden or the user moved to another field: keep what was shown and stop. */
@@ -235,13 +269,13 @@ class VoiceInputService : InputMethodService() {
         if (pending.isNotBlank()) commitFinal(pending) else { currentInputConnection?.finishComposingText(); composingSpace = null }
         lastInterim = ""
         render()
-        AppLog.write("paused by ⌫" + if (pending.isNotBlank()) " (kept: $pending)" else "")
+        AppLog.write("paused by a key" + if (pending.isNotBlank() && Settings.developmentMode(this)) " (kept: $pending)" else "")
     }
 
-    /** Hold to repeat, like a keyboard's delete key: once on touch, then every 50 ms after 400 ms. */
+    /** Hold to repeat, like a keyboard's delete key: once on touch, then every 150 ms (a word each) after 400 ms. */
     private fun repeatWhileHeld(view: View, action: () -> Unit) {
         val repeat = object : Runnable {
-            override fun run() { action(); main.postDelayed(this, 50) }
+            override fun run() { action(); main.postDelayed(this, 150) }
         }
         view.setOnTouchListener { v, event ->
             when (event.actionMasked) {
@@ -301,37 +335,82 @@ class VoiceInputService : InputMethodService() {
     }
 
     /**
-     * ⌫ always deletes. While listening, or while waiting for the last result after a pause, it first
-     * pauses: the text shown so far is typed in as it is and the recognizer is stopped, so the deletion
-     * isn't undone by a later result. (Before, ⌫ was ignored while there was composing text, i.e. for up
-     * to 6 s after pausing on a slow connection.)
+     * ⌫ deletes a whole word: the word before the cursor, or the word the cursor is in (both parts),
+     * with the spaces before it, keeping one space if words remain on both sides. A line break before
+     * the cursor is deleted on its own, a selection as a whole.
+     *
+     * While listening, or while waiting for the last result after a pause, it first pauses: the text
+     * shown so far is typed in as it is and the recognizer is stopped, so the deletion isn't undone by
+     * a later result.
      */
     private fun backspace() {
-        if (afterFinish != null) return // ✓ / ⏎ / ⌨ is already finishing and leaving
+        if (afterFinish != null) return
         if (state != State.IDLE) pauseNow()
-        currentInputConnection?.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL))
-        currentInputConnection?.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL))
+        val ic = currentInputConnection ?: return
+        if (!ic.getSelectedText(0).isNullOrEmpty()) { ic.commitText("", 1); return }
+        val before = ic.getTextBeforeCursor(WORD_WINDOW, 0)?.toString()
+        val after = ic.getTextAfterCursor(WORD_WINDOW, 0)?.toString()
+        if (before.isNullOrEmpty() || after == null) { sendDelete(ic); return }
+        if (before.last() == '\n') { ic.deleteSurroundingText(1, 0); return }
+        var wordStart = before.length
+        while (wordStart > 0 && isSpace(before[wordStart - 1])) wordStart--
+        val cursorInWord = wordStart == before.length
+        while (wordStart > 0 && !before[wordStart - 1].isWhitespace()) wordStart--
+        val afterCount = if (cursorInWord) after.takeWhile { !it.isWhitespace() }.length else 0
+        var start = wordStart
+        while (start > 0 && isSpace(before[start - 1])) start--
+        val wordOnLeft = start > 0 && !before[start - 1].isWhitespace()
+        val wordOnRight = after.length > afterCount && !after[afterCount].isWhitespace()
+        if (wordOnLeft && wordOnRight && start < wordStart) start++ // keep one space between them
+        ic.beginBatchEdit()
+        ic.deleteSurroundingText(before.length - start, afterCount)
+        ic.endBatchEdit()
+    }
+
+    /** ◀ ▶: move the cursor to the start of the previous word or the end of the next one. */
+    private fun moveWord(back: Boolean) {
+        if (afterFinish != null) return
+        if (state != State.IDLE) pauseNow()
+        val ic = currentInputConnection ?: return
+        val (start, end) = selection(ic) ?: return
+        val offset = if (back) {
+            val before = ic.getTextBeforeCursor(WORD_WINDOW, 0) ?: return
+            var i = before.length
+            while (i > 0 && before[i - 1].isWhitespace()) i--
+            while (i > 0 && !before[i - 1].isWhitespace()) i--
+            i - before.length
+        } else {
+            val after = ic.getTextAfterCursor(WORD_WINDOW, 0) ?: return
+            var i = 0
+            while (i < after.length && after[i].isWhitespace()) i++
+            while (i < after.length && !after[i].isWhitespace()) i++
+            i
+        }
+        val target = (if (back) start else end) + offset
+        ic.setSelection(target, target)
+        selStart = target
+        selEnd = target
+    }
+
+    /** The field's selection (absolute offsets): asked from the app, else the last one it reported. */
+    private fun selection(ic: InputConnection): Pair<Int, Int>? {
+        val extracted = ic.getExtractedText(ExtractedTextRequest(), 0)
+        if (extracted != null && extracted.selectionStart >= 0) {
+            val a = extracted.startOffset + minOf(extracted.selectionStart, extracted.selectionEnd)
+            val b = extracted.startOffset + maxOf(extracted.selectionStart, extracted.selectionEnd)
+            return a to b
+        }
+        return if (selStart >= 0) minOf(selStart, selEnd) to maxOf(selStart, selEnd) else null
+    }
+
+    private fun isSpace(c: Char) = c == ' ' || c == '\t' || c == '\u00A0'
+
+    private fun sendDelete(ic: InputConnection) {
+        ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL))
+        ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL))
     }
 
     // Leaving
-
-    private fun done(pressEnter: Boolean) = stopListening {
-        if (pressEnter) pressEnterKey()
-        switchBack(waitForLastResult = false)
-    }
-
-    private fun pressEnterKey() {
-        val ic = currentInputConnection ?: return
-        val info = currentInputEditorInfo
-        val action = (info?.imeOptions ?: 0) and EditorInfo.IME_MASK_ACTION
-        val noEnterAction = ((info?.imeOptions ?: 0) and EditorInfo.IME_FLAG_NO_ENTER_ACTION) != 0
-        if (!noEnterAction && action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED) {
-            ic.performEditorAction(action)
-        } else {
-            ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
-            ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
-        }
-    }
 
     private fun switchBack(waitForLastResult: Boolean) {
         if (waitForLastResult) { stopListening { switchBack(false) }; return }
@@ -349,7 +428,7 @@ class VoiceInputService : InputMethodService() {
         when (state) {
             State.LISTENING -> { micCircle.setColor(Color.rgb(217, 48, 37)); showStatus("در حال گوش دادن…") }
             State.FINISHING -> { micCircle.setColor(Color.rgb(242, 153, 0)); showStatus("…") }
-            State.IDLE -> { micCircle.setColor(if (dark) Color.rgb(95, 99, 104) else Color.rgb(189, 193, 198)); micButton.alpha = 1f; showStatus("Paused — ⌫ to delete, 🎤 to resume") }
+            State.IDLE -> { micCircle.setColor(if (dark) Color.rgb(95, 99, 104) else Color.rgb(189, 193, 198)); micButton.alpha = 1f; showStatus("Paused — 🎤 to dictate") }
         }
     }
 
@@ -362,4 +441,9 @@ class VoiceInputService : InputMethodService() {
     }
 
     private fun tap(v: View) = v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+
+    private companion object {
+        /** How much text around the cursor ⌫ and ◀ ▶ look at: longer than any word. */
+        const val WORD_WINDOW = 200
+    }
 }
