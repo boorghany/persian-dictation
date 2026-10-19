@@ -121,6 +121,17 @@ Swift package `PersianDictation`, macOS 13+, built with Command Line Tools (no X
 Features: ⌃⌥Space toggles dictation (⌃Space is left for input-source switching). While listening only,
 **Esc** and **Enter** (main or keypad) stop, finalize and paste; **Shift+Enter** is not intercepted
 (Carbon hotkeys match exact modifiers). Enter does *not* send in chat apps — offered as an option, not built.
+**Paste during short pauses** (0.16.0, menu toggle, default on; Mac only — Android already shows the
+interim as composing text): Google finalizes only after ~1.2 s of silence (log: median 1.17 s from the last
+interim change to the final), so the user had to pause every 10–15 words. `ContinuousRecognizer.earlyCommit`:
+after 0.6 s of silence (same VAD as the watchdog) with the interim unchanged for 0.5 s, deliver its words
+except the last (Google still revises it sometimes: شدن → شدند) and except a trailing first word of a spoken
+punctuation phrase (علامت, خط, دو, …). Same Google session — only the pasting is earlier. The final then
+delivers only what's left: aligned by text without spaces/ZWNJ (دو تا = دوتا); if Google changed an already
+pasted word it stays (log `final revised early text`), if the final is mostly different all of it is typed
+(`final differs from early text`). Simulated on 2788 logged utterances: ~2–4 % of early pieces were later
+revised by Google, mostly the last word (hence holding it back). Suppressed while a new session may be re-recognizing the previous final from its pre-roll.
+Replay with `--early-commit`. The user may want this reverted: the menu toggle or revert the 0.16.0 commit.
 Language menu (fa-IR / en-US). Version shown as the first menu line, e.g. "Persian Dictation 0.2.0 (build 8)".
 
 Build & install: `./scripts/build-app.sh --install` → bumps `build-number.txt`, builds into

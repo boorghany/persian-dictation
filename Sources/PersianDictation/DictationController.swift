@@ -128,6 +128,7 @@ final class DictationController {
         let r = ContinuousRecognizer(apiKey: Settings.apiKey, language: language)
         r.verbose = Settings.developmentMode
         r.recordSessions = Settings.developmentMode
+        r.earlyCommit = Settings.pasteDuringPauses
         r.onInterim = { [weak self] text in
             guard let self else { return }
             let preview = SpokenPunctuation.apply(Corrections.apply(text, language: self.language), language: self.language)
@@ -223,6 +224,12 @@ enum Settings {
     static var developmentMode: Bool {
         get { UserDefaults.standard.object(forKey: "developmentMode") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "developmentMode") }
+    }
+
+    /// Paste the stable words during short pauses instead of waiting for Google's final (~1.2 s of silence).
+    static var pasteDuringPauses: Bool {
+        get { UserDefaults.standard.object(forKey: "pasteDuringPauses") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "pasteDuringPauses") }
     }
 
     /// The chosen microphone's uniqueID, or nil to follow the macOS default input.

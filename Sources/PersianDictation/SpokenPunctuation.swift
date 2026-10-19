@@ -18,6 +18,13 @@ enum SpokenPunctuation {
         ("ویرگول", "،"),
     ]
 
+    /// Whether `word` begins a multi-word phrase ("علامت" of "علامت سوال"), so text ending in it may
+    /// still turn into a symbol.
+    static func startsPhrase(_ word: String, language: String) -> Bool {
+        guard language.hasPrefix("fa") else { return false }
+        return persian.contains { $0.phrase.hasPrefix(word + " ") }
+    }
+
     /// Attach to the previous word: no space before, one after when a word follows.
     private static let symbols = ".،؟:)"
 
