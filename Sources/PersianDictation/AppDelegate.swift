@@ -189,6 +189,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func toggleDevelopmentMode() {
+        if !Settings.developmentMode {
+            let alert = NSAlert()
+            alert.messageText = "Turn on Development Mode?"
+            alert.informativeText = "Development Mode saves a recording of everything you dictate and the recognized "
+                + "text in ~/Library/Logs (kept for 7 days). This may include private or confidential information. "
+                + "Use it only for troubleshooting."
+            alert.addButton(withTitle: "Turn On")
+            alert.addButton(withTitle: "Cancel")
+            NSApp.activate(ignoringOtherApps: true)
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
         Settings.developmentMode.toggle()
         DiagnosticsLog.write("developmentMode=\(Settings.developmentMode)")
         refresh()

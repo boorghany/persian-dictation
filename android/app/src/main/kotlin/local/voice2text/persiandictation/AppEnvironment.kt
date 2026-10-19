@@ -18,7 +18,7 @@ object Settings {
     private fun prefs(context: Context) = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
     /** Development mode: verbose log plus a WAV recording of every session. On by default while testing. */
-    fun developmentMode(context: Context) = prefs(context).getBoolean("developmentMode", true)
+    fun developmentMode(context: Context) = prefs(context).getBoolean("developmentMode", false)
     fun setDevelopmentMode(context: Context, on: Boolean) = prefs(context).edit().putBoolean("developmentMode", on).apply()
 
     const val LANGUAGE = "fa-IR"

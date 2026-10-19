@@ -27,7 +27,9 @@ Personal use only; the APK is sideloaded, never published.
   the first push, review with the user: `testdata/recordings/*.wav` are the user's own voice and dictated
   text; this file mentions their phone, location/VPN and headset; the Chromium key is public but unofficial
   use of Google's endpoint should be explained in a README; add a LICENSE.
-- **Development mode stays on** while testing (verbose log + a WAV recording of every Google session).
+- **Development mode** (verbose log + a WAV recording of every Google session) is **off by default** since
+  0.17.0 (the user's request, for other people installing it); turning it on first warns that private speech
+  and text are saved. Without it, the log must not contain dictated text. To debug, ask the user to turn it on.
 - To debug a recognition problem: find the session's recording, **replay it** (see Testing), reproduce,
   fix, then rerun the regression set. Measure before guessing — every workaround below came from logs.
 
@@ -149,7 +151,7 @@ Signing / Accessibility (painful history — don't regress):
   `/Applications` stays registered. If the grant is lost: remove the entry with "−" in System Settings →
   Privacy & Security → Accessibility (toggling off is not enough), then re-grant.
 
-Dev mode (menu toggle, default on): log `~/Library/Logs/PersianDictation.log` (session open/handover/end,
+Dev mode (menu toggle, default off, confirmation alert before turning on): log `~/Library/Logs/PersianDictation.log` (session open/handover/end,
 every interim/final with session-relative ms, repairs, recoveries, mic name), recordings
 `~/Library/Logs/PersianDictation/recordings/<UTC>-s<N>.wav` = exact audio sent to that session
 (pre-roll included), pruned after 7 days.
@@ -184,7 +186,7 @@ action + back to Gboard, ✓ finish + back to Gboard (`switchToPreviousInputMeth
 picker). Hiding the keyboard keeps the composing text and stops. Mic: `AudioRecord` VOICE_RECOGNITION.
 `method.xml` declares no subtypes so it is one entry in the keyboard picker.
 
-Dev mode (switch in the setup screen, default on): `Android/data/local.voice2text.persiandictation/files/`
+Dev mode (switch in the setup screen, default off, confirmation dialog before turning on): `Android/data/local.voice2text.persiandictation/files/`
 holds `PersianDictation.log` (+ connection traces) and `recordings/`. Test hook: if `test-input.wav`
 exists there, it is played instead of the microphone (used for emulator tests; delete it afterwards).
 

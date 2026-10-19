@@ -97,9 +97,27 @@ class SetupActivity : Activity() {
         column.addView(Switch(this).apply {
             text = "Log recognizer results and record audio"
             isChecked = Settings.developmentMode(this@SetupActivity)
-            setOnCheckedChangeListener { _, on ->
-                Settings.setDevelopmentMode(this@SetupActivity, on)
-                AppLog.write("developmentMode=$on")
+            setOnCheckedChangeListener { button, on ->
+                if (!on) {
+                    Settings.setDevelopmentMode(this@SetupActivity, false)
+                    AppLog.write("developmentMode=false")
+                    return@setOnCheckedChangeListener
+                }
+                if (Settings.developmentMode(this@SetupActivity)) return@setOnCheckedChangeListener
+                // It keeps private speech on the phone: ask first.
+                button.isChecked = false
+                android.app.AlertDialog.Builder(this@SetupActivity)
+                    .setTitle("Turn on development mode?")
+                    .setMessage("Development mode saves a recording of everything you dictate and the recognized text " +
+                        "on this phone (kept for 7 days). This may include private or confidential information. " +
+                        "Use it only for troubleshooting.")
+                    .setPositiveButton("Turn on") { _, _ ->
+                        Settings.setDevelopmentMode(this@SetupActivity, true)
+                        AppLog.write("developmentMode=true")
+                        button.isChecked = true
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
             }
         })
         column.addView(body("Logs and recordings: Android/data/$packageName/files"))

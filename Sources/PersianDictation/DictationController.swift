@@ -220,9 +220,10 @@ enum Settings {
         UserDefaults.standard.string(forKey: "apiKey") ?? defaultAPIKey
     }
 
-    /// Development mode: verbose log plus a WAV recording of every session. On by default while testing.
+    /// Development mode: verbose log (with the dictated text) plus a WAV recording of every session.
+    /// Off by default; turning it on asks first, since it keeps private speech on disk.
     static var developmentMode: Bool {
-        get { UserDefaults.standard.object(forKey: "developmentMode") as? Bool ?? true }
+        get { UserDefaults.standard.object(forKey: "developmentMode") as? Bool ?? false }
         set { UserDefaults.standard.set(newValue, forKey: "developmentMode") }
     }
 

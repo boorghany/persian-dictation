@@ -169,7 +169,7 @@ class ContinuousRecognizer(private val apiKey: String, private val language: Str
             if (text.isBlank() && lastInterim.isNotEmpty()) {
                 // Google dropped an utterance it had been transcribing.
                 if (phase == Phase.RUNNING && recoveries < MAX_RECOVERIES) {
-                    recover("empty final after \"$lastInterim\"")
+                    recover(if (verbose) "empty final after \"$lastInterim\"" else "empty final")
                     return@final
                 }
                 // Out of retries: keep what Google showed rather than lose it, unless it's a
@@ -184,7 +184,7 @@ class ContinuousRecognizer(private val apiKey: String, private val language: Str
             if (trimmed.isNotEmpty() && trimmed == previousFinal && sessionSeconds < sessionPreroll + 1) {
                 // Too soon to come from new speech: Google re-finalized the pre-roll. (Backstop for
                 // the pre-roll limit in handOver; seen as "من راستش اینجا" typed 4 times.)
-                log("dropped duplicate final \"$trimmed\" (came from the pre-roll)")
+                log("dropped duplicate final" + (if (verbose) " \"$trimmed\"" else "") + " (came from the pre-roll)")
             } else {
                 if (trimmed.isNotEmpty()) previousFinal = trimmed
                 onFinal?.invoke(repair.final(text))
