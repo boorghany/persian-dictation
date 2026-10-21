@@ -2,7 +2,6 @@ import AppKit
 
 // Debug mode: `PersianDictation --transcribe <file.wav|file.raw> [lang]` streams 16 kHz / 16-bit /
 // mono PCM (e.g. a development-mode recording) through the recognizer and prints the results.
-// `--early-commit` delivers stable words during short pauses, as the app does by default.
 if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--transcribe" {
     var pcm = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[2]))
     if pcm.prefix(4) == Data("RIFF".utf8) { pcm = pcm.dropFirst(44) } // our recordings use a 44-byte header
@@ -23,7 +22,6 @@ if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--transcribe" 
             recognizer.simulatedFault = .emptyFinal(session: n)
         }
     }
-    recognizer.earlyCommit = CommandLine.arguments.contains("--early-commit")
     recognizer.onInterim = { if !$0.isEmpty { print(stamp(), "interim:", $0) } }
     recognizer.onFinal = { print(stamp(), "FINAL:", $0) }
     recognizer.onEnd = { error in

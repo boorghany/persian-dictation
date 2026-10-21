@@ -17,12 +17,8 @@ import Foundation
 final class ContinuousRecognizer {
     /// Current hypothesis of the utterance in progress (prefix-drop repaired).
     var onInterim: ((String) -> Void)?
-    /// A finalized utterance (prefix-drop repaired). With `earlyCommit`, also each stable piece of one,
-    /// and at the end only the part not delivered yet.
+    /// A finalized utterance (prefix-drop repaired).
     var onFinal: ((String) -> Void)?
-    /// Deliver the stable words of the utterance in progress during short pauses instead of waiting
-    /// for Google's final, which only comes after about 1.2 s of silence.
-    var earlyCommit = false
     /// Called once: after `finish()` completes, or when the connection keeps failing.
     var onEnd: ((Error?) -> Void)?
     /// Diagnostics output. `verbose` adds every interim and final.
@@ -67,17 +63,6 @@ final class ContinuousRecognizer {
     /// Recoveries for the utterance in progress; reset once an utterance is finalized.
     private var recoveries = 0
     private var recentLevels: [Float] = []
-
-    // Early commit state.
-    /// The part of the utterance in progress that was already delivered early (repaired interim text).
-    private var committed = ""
-    /// The current session's latest interim text, prefix-drop repaired.
-    private var repairedInterim = ""
-    /// When the microphone last heard speech.
-    private var lastSpeech = Date.distantPast
-    /// Deliver early after this much silence, once the text hasn't changed for `earlyTextSeconds`.
-    private static let earlyPauseSeconds: TimeInterval = 0.6
-    private static let earlyTextSeconds: TimeInterval = 0.5
     private var watchdog: Timer?
     /// Whether the current session's audio is actually reaching Google. The freeze clock starts then.
     private var connected = false
@@ -115,10 +100,8 @@ final class ContinuousRecognizer {
         if sessionAudio.count > Self.sessionAudioBytes { sessionAudio.removeFirst(sessionAudio.count - Self.sessionAudioBytes) }
         if isSpeech(pcm) {
             speechSinceProgress += Double(pcm.count) / Double(SpeechStream.sampleRate * 2)
-            lastSpeech = Date()
         }
         stream?.send(pcm)
-        if earlyCommit { commitEarlyIfPaused() }
     }
 
     /// No more audio: let the current session deliver its last result, then call `onEnd`.
@@ -147,7 +130,6 @@ final class ContinuousRecognizer {
         lastProgress = Date()
         speechSinceProgress = 0
         lastInterim = ""
-        repairedInterim = ""
         lastTextChange = nil
         sessionPreroll = Double(preroll.count) / Double(SpeechStream.sampleRate * 2)
         connected = false
@@ -181,8 +163,7 @@ final class ContinuousRecognizer {
                     self.lastProgress = Date()
                     self.speechSinceProgress = 0
                 }
-                self.repairedInterim = self.repair.interim(text)
-                self.onInterim?(self.repairedInterim)
+                self.onInterim?(self.repair.interim(text))
             }
         }
         s.onFinal = { [weak self, weak s] text in
@@ -214,9 +195,8 @@ final class ContinuousRecognizer {
                     self.log("dropped duplicate final" + (self.verbose ? " \"\(trimmed)\"" : "") + " (came from the pre-roll)")
                 } else {
                     if !trimmed.isEmpty { self.previousFinal = trimmed }
-                    self.deliverFinal(self.repair.final(text))
+                    self.onFinal?(self.repair.final(text))
                 }
-                self.committed = ""
                 if self.phase == .running { self.handOver() }
             }
         }
@@ -273,76 +253,6 @@ final class ContinuousRecognizer {
 
     private var sessionMillis: Int { Int(Date().timeIntervalSince(sessionStart) * 1000) }
 
-    // MARK: Early commit
-
-    /// During a short pause, deliver the words Google is unlikely to change: all but the last one
-    /// (it is sometimes still revised, شدن → شدند), and never the first word of a spoken punctuation
-    /// phrase whose second word may still come ("علامت" + "سوال").
-    private func commitEarlyIfPaused() {
-        guard phase == .running, let changed = lastTextChange,
-              Date().timeIntervalSince(changed) >= Self.earlyTextSeconds,
-              Date().timeIntervalSince(lastSpeech) >= Self.earlyPauseSeconds else { return }
-        var words = repairedInterim.split(separator: " ").map(String.init)
-        guard !words.isEmpty else { return }
-        words.removeLast()
-        while let last = words.last, SpokenPunctuation.startsPhrase(last, language: language) { words.removeLast() }
-        let candidate = words.joined(separator: " ")
-        let squeezedCandidate = Self.squeezed(candidate)
-        guard squeezedCandidate.count > Self.squeezed(committed).count else { return }
-        // A new session re-recognizing the previous utterance from its pre-roll (see the duplicate-final check).
-        if Date().timeIntervalSince(sessionStart) < sessionPreroll + 1,
-           Self.squeezed(previousFinal).starts(with: squeezedCandidate) { return }
-        // Wait for the final if Google changed what was already delivered.
-        guard Self.commonPrefix(candidate, committed) == Self.squeezed(committed).count else { return }
-        let piece = Self.words(of: candidate, after: Self.squeezed(committed).count)
-        guard !piece.isEmpty else { return }
-        committed = candidate
-        log("early commit" + (verbose ? ": \(piece)" : String(format: " (%d words)", piece.split(separator: " ").count)))
-        onFinal?(piece)
-    }
-
-    /// A final, minus the part of it that was delivered early.
-    private func deliverFinal(_ final: String) {
-        guard !committed.isEmpty else { onFinal?(final); return }
-        let length = Self.squeezed(committed).count
-        let common = Self.commonPrefix(final, committed)
-        if common == length {
-            let rest = Self.words(of: final, after: length)
-            if !rest.isEmpty { onFinal?(rest) }
-        } else if Double(common) >= 0.6 * Double(length) {
-            // Google changed a word that was already typed; keep it and type what follows it.
-            log("final revised early text" + (verbose ? " \"\(committed)\" → \"\(final)\"" : ""))
-            let rest = Self.words(of: final, after: length)
-            if !rest.isEmpty { onFinal?(rest) }
-        } else {
-            // Mostly different (e.g. after a reconnect the final covers new speech only): type all of it.
-            log("final differs from early text" + (verbose ? " \"\(committed)\" → \"\(final)\"" : "") + "; typing all of it")
-            onFinal?(final)
-        }
-    }
-
-    /// Text without spaces and ZWNJ, so "دو تا" = "دوتا" and "می‌خوام" = "میخوام". (By scalars: Swift
-    /// keeps a ZWNJ in the same Character as the letter before it.)
-    private static func squeezed(_ s: String) -> [Unicode.Scalar] {
-        s.unicodeScalars.filter { $0 != " " && $0 != "\u{200C}" }
-    }
-
-    private static func commonPrefix(_ a: String, _ b: String) -> Int {
-        zip(squeezed(a), squeezed(b)).prefix { $0 == $1 }.count
-    }
-
-    /// The words of `text` after its first `length` squeezed scalars. A word that the boundary falls
-    /// inside of counts as already delivered.
-    private static func words(of text: String, after length: Int) -> String {
-        let words = text.split(separator: " ")
-        var seen = 0
-        for (i, word) in words.enumerated() {
-            if seen >= length { return words[i...].joined(separator: " ") }
-            seen += squeezed(String(word)).count
-        }
-        return ""
-    }
-
     // MARK: Watchdog
 
     private func faultSilences() -> Bool {
@@ -374,7 +284,6 @@ final class ContinuousRecognizer {
             // Replaying didn't help: give up on this utterance's audio and start clean.
             log("still frozen after \(recoveries) replays; starting a fresh session")
             recoveries = 0
-            committed = ""
             let old = stream
             openSession(preroll: prerollAudio())
             old?.cancel()

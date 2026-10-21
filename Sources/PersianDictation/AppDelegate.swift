@@ -25,8 +25,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var languageItems: [NSMenuItem] = []
     private let developmentItem = NSMenuItem(title: "Development Mode (log + record audio)",
                                              action: #selector(toggleDevelopmentMode), keyEquivalent: "")
-    private let pauseItem = NSMenuItem(title: "Paste During Short Pauses",
-                                       action: #selector(togglePasteDuringPauses), keyEquivalent: "")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -94,8 +92,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let languageItem = NSMenuItem(title: "Language", action: nil, keyEquivalent: "")
         languageItem.submenu = languageMenu
         menu.addItem(languageItem)
-        pauseItem.target = self
-        menu.addItem(pauseItem)
 
         accessibilityItem.target = self
         menu.addItem(accessibilityItem)
@@ -166,7 +162,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         microphoneItem.title = "Microphone: \(Settings.microphoneID == nil ? "System Default" : AudioCapture.preferred()?.localizedName ?? "?")"
         accessibilityItem.isHidden = TextInserter.isTrusted(prompt: false)
         developmentItem.state = Settings.developmentMode ? .on : .off
-        pauseItem.state = Settings.pasteDuringPauses ? .on : .off
         for item in languageItems {
             item.state = (item.representedObject as? String) == Settings.language ? .on : .off
         }
@@ -179,12 +174,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func selectLanguage(_ sender: NSMenuItem) {
         guard let code = sender.representedObject as? String else { return }
         Settings.language = code
-        refresh()
-    }
-
-    @objc private func togglePasteDuringPauses() {
-        Settings.pasteDuringPauses.toggle()
-        DiagnosticsLog.write("pasteDuringPauses=\(Settings.pasteDuringPauses)")
         refresh()
     }
 
