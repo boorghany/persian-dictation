@@ -17,6 +17,10 @@ final class DictationController {
     private var recognizer: ContinuousRecognizer?
     private var insertedAny = false
     private var lastInsertAttachesToNext = false
+    /// Line breaks that ended the last final, not pasted yet: many editors (web text boxes, Quill)
+    /// drop or hide a line break at the very end of pasted text, so "پاراگراف بعد" became one line
+    /// break. They are pasted at the start of the next final instead, or when dictation ends.
+    private var pendingBreaks = ""
     private var finishTimeout: DispatchWorkItem?
     private var dictationStart = Date()
     private var gotFirstAudio = false
@@ -59,6 +63,7 @@ final class DictationController {
     private func begin() {
         insertedAny = false
         lastInsertAttachesToNext = false
+        pendingBreaks = ""
         dictationStart = Date()
         gotFirstAudio = false
         let mics = AudioCapture.microphones().map(\.localizedName).joined(separator: ", ")
@@ -115,6 +120,7 @@ final class DictationController {
     }
 
     private func completeFinish() {
+        pastePendingBreaks()
         finishTimeout?.cancel()
         finishTimeout = nil
         recognizer = nil
@@ -131,7 +137,8 @@ final class DictationController {
         r.onInterim = { [weak self] text in
             guard let self else { return }
             let preview = SpokenPunctuation.apply(Corrections.apply(text, language: self.language), language: self.language)
-            self.overlay.show(preview.isEmpty ? self.placeholder : preview.replacingOccurrences(of: "\n", with: " ↵ "))
+            self.overlay.show(preview.isEmpty ? self.placeholder
+                : (self.pendingBreaks + preview).replacingOccurrences(of: "\n", with: " ↵ "))
         }
         r.onFinal = { [weak self] text in
             self?.insert(text)
@@ -141,6 +148,7 @@ final class DictationController {
             switch self.state {
             case .listening:
                 // The connection kept failing.
+                self.pastePendingBreaks()
                 self.audio?.stop()
                 self.audio = nil
                 self.recognizer = nil
@@ -160,10 +168,31 @@ final class DictationController {
     private func insert(_ raw: String) {
         let text = SpokenPunctuation.apply(Corrections.apply(raw, language: language), language: language)
         guard !text.isEmpty else { return }
-        let needsSpace = insertedAny && !lastInsertAttachesToNext && !SpokenPunctuation.attachesToPrevious(text)
-        TextInserter.insert(needsSpace ? " " + text : text)
+        var body = text
+        var breaks = ""
+        while body.hasSuffix("\n") {
+            body.removeLast()
+            breaks += "\n"
+        }
+        guard !body.isEmpty else {
+            pendingBreaks += breaks
+            return
+        }
+        let paste = pendingBreaks + body
+        let needsSpace = insertedAny && !lastInsertAttachesToNext && !SpokenPunctuation.attachesToPrevious(paste)
+        TextInserter.insert(needsSpace ? " " + paste : paste)
         insertedAny = true
-        lastInsertAttachesToNext = SpokenPunctuation.attachesToNext(text)
+        lastInsertAttachesToNext = SpokenPunctuation.attachesToNext(body)
+        pendingBreaks = breaks
+    }
+
+    /// Dictation ended right after a line break command: paste it as is.
+    private func pastePendingBreaks() {
+        guard !pendingBreaks.isEmpty else { return }
+        TextInserter.insert(pendingBreaks)
+        insertedAny = true
+        lastInsertAttachesToNext = true
+        pendingBreaks = ""
     }
 
     // MARK: Accessibility

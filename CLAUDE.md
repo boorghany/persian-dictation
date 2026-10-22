@@ -99,6 +99,10 @@ All found from real recordings; the Android `core` module is a line-by-line port
    symbols (incl. `)`), one after if a word follows (decimals and times like 10:30 untouched); `(` gets a space
    before and none after; no spaces around newlines. `attachesToNext` (text ending in `(` or a newline): the
    next final gets no leading space (Mac `lastInsertAttachesToNext`, Android `needsSpaceBefore`).
+   **Mac: trailing line breaks are held back** (0.21.0, `DictationController.pendingBreaks`) and pasted at the
+   start of the next final, or alone when dictation ends. Many editors (the browser, Quill-based ones) drop
+   or hide a line break at the very end of pasted text, so a "پاراگراف بعد" pasted on its own (`\n\n`)
+   showed as one line break and the user had to say "خط بعد" again (log 2026-10-22 00:33, 00:37).
    Known gaps: literal "خط بد" becomes a newline; "۲ نقطه" written with a digit isn't converted.
 
 ## macOS app (repo root)
