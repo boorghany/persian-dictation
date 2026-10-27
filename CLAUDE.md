@@ -22,9 +22,9 @@ Personal use at first; since 2026-10-19 the Android app is also being published 
   Android: `versionName` in `android/app/build.gradle*`. The build scripts only bump the build number.
 - **Commit every change** to the local git repo (branch `main`, created 2026-10-08) after it builds and its
   tests/replays pass: one commit per change, message says what and why, version in the subject when bumped.
+  Build output, APKs (`android/dist/`), `local.properties` and caches are git-ignored.
 - **Push after every commit** to GitHub (`origin` = private repo `boorghany/persian-dictation`; the user asked
   on 2026-10-27).
-  Build output, APKs (`android/dist/`), `local.properties` and caches are git-ignored.
 - **The user plans to publish this on GitHub later.** Keep secrets and personal data out of commits. Before
   the first push, review with the user: `testdata/recordings/*.wav` are the user's own voice and dictated
   text; this file mentions their phone, location/VPN and headset; the Chromium key is public but unofficial
