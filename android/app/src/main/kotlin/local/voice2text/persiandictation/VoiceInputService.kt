@@ -1,10 +1,14 @@
 package local.voice2text.persiandictation
 
+import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
+import android.os.Build
 import android.inputmethodservice.InputMethodService
 import android.os.Handler
 import android.os.Looper
@@ -19,6 +23,8 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.ExtractedTextRequest
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
+import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -30,9 +36,10 @@ import local.voice2text.core.SpokenPunctuation
 /**
  * A voice-only keyboard used next to Gboard. It opens paused; 🎤 starts listening. The hypothesis in
  * progress goes into the text field as composing (underlined) text and each finalized utterance is
- * committed. ⌫ deletes and ◀ ▶ move by whole words; ⌨ switches back to the previous keyboard (Gboard).
- * Also: 😊 emoji picker, 📋 paste, space, and a submit key that does the field's action (send, search…)
- * like Gboard's. Number, phone, date and password fields go straight back to the previous keyboard.
+ * committed. ⌫ deletes and ◀ ▶ move by whole words; ⌨ switches back to the previous keyboard (Gboard);
+ * the submit key does the field's action (send, search…) like Gboard's. A toolbar above, as in Gboard:
+ * emoji picker and a paste chip showing the start of the clipboard text. Monochrome Material icons tinted
+ * for the light/dark theme. Number, phone, date and password fields go straight back to the previous keyboard.
  */
 class VoiceInputService : InputMethodService() {
     private enum class State { IDLE, LISTENING, FINISHING }
@@ -60,8 +67,12 @@ class VoiceInputService : InputMethodService() {
     private lateinit var status: TextView
     private lateinit var micButton: TextView
     private lateinit var micCircle: GradientDrawable
-    private lateinit var submitKey: TextView
-    private lateinit var emojiKey: TextView
+    private lateinit var submitIcon: ImageView
+    private lateinit var submitLabel: TextView
+    private lateinit var emojiKey: ImageView
+    private lateinit var clipText: TextView
+    private val clipboard by lazy { getSystemService(CLIPBOARD_SERVICE) as ClipboardManager }
+    private val clipListener = ClipboardManager.OnPrimaryClipChangedListener { main.post { showClipboard() } }
     private lateinit var emojiPanel: View
     private lateinit var emojiRecentRow: LinearLayout
     private var keyHeight = 0
@@ -76,6 +87,7 @@ class VoiceInputService : InputMethodService() {
         super.onCreate()
         AppLog.init(this)
         AppLog.write("ime created version=\"${versionDisplay(this)}\"")
+        clipboard.addPrimaryClipChangedListener(clipListener)
     }
 
     override fun onEvaluateFullscreenMode() = false
@@ -87,6 +99,17 @@ class VoiceInputService : InputMethodService() {
         val fg = if (dark) Color.rgb(232, 234, 237) else Color.rgb(32, 33, 36)
         val muted = if (dark) Color.rgb(154, 160, 166) else Color.rgb(95, 99, 104)
         val keyBg = if (dark) Color.rgb(60, 64, 67) else Color.WHITE
+        // Gboard's action key: the Material You accent where there is one (Android 12+), else Google blue.
+        val accentBg: Int
+        val accentFg: Int
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            accentBg = getColor(if (dark) android.R.color.system_accent1_200 else android.R.color.system_accent1_600)
+            accentFg = getColor(if (dark) android.R.color.system_accent1_900 else android.R.color.white)
+        } else {
+            accentBg = if (dark) Color.rgb(138, 180, 248) else Color.rgb(26, 115, 232)
+            accentFg = if (dark) Color.rgb(32, 33, 36) else Color.WHITE
+        }
+        val ripple = ColorStateList.valueOf(if (dark) 0x33FFFFFF else 0x22000000)
 
         status = TextView(this).apply {
             textSize = 17f
@@ -95,7 +118,7 @@ class VoiceInputService : InputMethodService() {
             textDirection = View.TEXT_DIRECTION_RTL
             maxLines = 2
             ellipsize = android.text.TextUtils.TruncateAt.START
-            setPadding(px(12), px(10), px(12), px(6))
+            setPadding(px(12), px(6), px(12), px(6))
         }
         micCircle = GradientDrawable().apply { shape = GradientDrawable.OVAL }
         micButton = TextView(this).apply {
@@ -105,34 +128,69 @@ class VoiceInputService : InputMethodService() {
             background = micCircle
             setOnClickListener { tap(it); toggleListening() }
         }
-        fun key(label: String, weight: Float = 1f, action: () -> Unit) = TextView(this).apply {
-            text = label
-            textSize = 22f
-            gravity = Gravity.CENTER
-            setTextColor(fg)
-            maxLines = 1
-            background = GradientDrawable().apply { setColor(keyBg); cornerRadius = px(8).toFloat() }
-            setOnClickListener { tap(it); action() }
+        fun icon(res: Int, tint: Int) = ImageView(this).apply {
+            setImageResource(res)
+            imageTintList = ColorStateList.valueOf(tint)
+            scaleType = ImageView.ScaleType.CENTER
+        }
+        fun keyBackground(color: Int) = RippleDrawable(ripple, GradientDrawable().apply { setColor(color); cornerRadius = px(8).toFloat() }, null)
+        fun key(res: Int, weight: Float = 1f) = icon(res, fg).apply {
+            background = keyBackground(keyBg)
             layoutParams = LinearLayout.LayoutParams(0, px(48), weight).apply { setMargins(px(4), 0, px(4), 0) }
         }
-        fun row(top: Int) = LinearLayout(this).apply {
+        val keys = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(px(4), px(top), px(4), px(4))
-        }
-        emojiKey = key("😊") { toggleEmoji() }
-        val keys = row(8).apply {
-            addView(key("⌨") { switchBack(waitForLastResult = false) })
-            addView(emojiKey)
-            addView(key("📋") { pasteClipboard() })
+            setPadding(px(4), px(8), px(4), px(4))
+            addView(key(R.drawable.ic_keyboard).apply { setOnClickListener { tap(it); switchBack(waitForLastResult = false) } })
             // Persian runs right to left: ▶ goes back to the previous word, ◀ forward to the next.
-            addView(key("◀") {}.apply { repeatWhileHeld(this) { moveWord(back = false) } })
-            addView(key("▶") {}.apply { repeatWhileHeld(this) { moveWord(back = true) } })
-            addView(key("⌫") {}.apply { repeatWhileHeld(this) { backspace() } })
+            addView(key(R.drawable.ic_chevron_left).apply { repeatWhileHeld(this) { moveWord(back = false) } })
+            addView(key(R.drawable.ic_chevron_right).apply { repeatWhileHeld(this) { moveWord(back = true) } })
+            // Points right: in Persian, deleting eats the text towards the right.
+            addView(key(R.drawable.ic_backspace_rtl).apply { repeatWhileHeld(this) { backspace() } })
+            submitIcon = icon(R.drawable.ic_return, accentFg)
+            submitLabel = TextView(this@VoiceInputService).apply {
+                textSize = 15f
+                setTextColor(accentFg)
+                gravity = Gravity.CENTER
+                maxLines = 1
+                visibility = View.GONE
+            }
+            addView(FrameLayout(this@VoiceInputService).apply {
+                background = keyBackground(accentBg)
+                addView(submitIcon, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+                addView(submitLabel, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+                setOnClickListener { tap(it); submitKeyPressed() }
+            }, LinearLayout.LayoutParams(0, px(48), 1.6f).apply { setMargins(px(4), 0, px(4), 0) })
         }
-        submitKey = key("↵", 2f) { submitKeyPressed() }
-        val keys2 = row(0).apply {
-            addView(key("␣", 4f) { typeSpace() }.apply { setTextColor(muted) })
-            addView(submitKey)
+
+        // Toolbar, as in Gboard: flat icons on the bar's colour, and the clipboard as a chip.
+        emojiKey = icon(R.drawable.ic_emoji, muted).apply {
+            background = RippleDrawable(ripple, null, null)
+            setOnClickListener { tap(it); toggleEmoji() }
+        }
+        clipText = TextView(this).apply {
+            textSize = 14f
+            setTextColor(fg)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            textDirection = View.TEXT_DIRECTION_FIRST_STRONG
+            setPadding(px(6), 0, 0, 0)
+        }
+        val clipChip = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(px(10), 0, px(12), 0)
+            background = RippleDrawable(ripple, GradientDrawable().apply { setColor(keyBg); cornerRadius = px(16).toFloat() }, null)
+            addView(icon(R.drawable.ic_paste, muted), LinearLayout.LayoutParams(px(20), px(20)))
+            addView(clipText, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            setOnClickListener { tap(it); pasteClipboard() }
+        }
+        val toolbar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(px(8), px(4), px(8), 0)
+            addView(emojiKey, LinearLayout.LayoutParams(px(44), px(40)))
+            addView(clipChip, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, px(32)).apply { marginStart = px(8) })
         }
         keyHeight = px(44)
         emojiRecentRow = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -154,12 +212,12 @@ class VoiceInputService : InputMethodService() {
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(if (dark) Color.rgb(32, 33, 36) else Color.rgb(232, 234, 237))
-            addView(status, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, px(64)))
+            addView(toolbar, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            addView(status, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, px(56)))
             addView(micButton, LinearLayout.LayoutParams(px(88), px(88)).apply { gravity = Gravity.CENTER_HORIZONTAL })
             // The emoji picker takes the place of the status line and the mic (same height).
-            addView(emojiPanel, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, px(152)))
+            addView(emojiPanel, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, px(144)))
             addView(keys, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-            addView(keys2, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
             addView(version)
             // Keep the keys above the navigation bar / gesture handle. The padding is set before the
             // first layout and changed only when the inset really changes: when the keyboard's height
@@ -176,7 +234,7 @@ class VoiceInputService : InputMethodService() {
                 }
                 insets
             }
-        }.also { render(); updateSubmitKey() }
+        }.also { render(); updateSubmitKey(); showClipboard() }
     }
 
     /** The system's navigation bar height, the usual bottom inset, so the padding rarely changes later. */
@@ -201,6 +259,7 @@ class VoiceInputService : InputMethodService() {
         }
         if (::emojiPanel.isInitialized) showEmoji(false)
         updateSubmitKey()
+        showClipboard()
         render()
     }
 
@@ -236,6 +295,7 @@ class VoiceInputService : InputMethodService() {
     }
 
     override fun onDestroy() {
+        clipboard.removePrimaryClipChangedListener(clipListener)
         stopEverything()
         super.onDestroy()
     }
@@ -587,32 +647,35 @@ class VoiceInputService : InputMethodService() {
     // Keys
 
     /** Like Gboard's: the field's action (send, search, go, next, done…), else Enter. */
-    private class SubmitAction(val label: String, val actionId: Int?, val newline: Boolean)
+    /** [label]: the app's own text for the key, shown instead of [icon]. */
+    private class SubmitAction(val icon: Int, val label: String?, val actionId: Int?, val newline: Boolean)
 
     private fun submitAction(info: EditorInfo?): SubmitAction {
-        if (info == null) return SubmitAction("↵", null, false)
+        if (info == null) return SubmitAction(R.drawable.ic_return, null, null, false)
         val multiLine = (info.inputType and InputType.TYPE_MASK_CLASS) == InputType.TYPE_CLASS_TEXT &&
             (info.inputType and InputType.TYPE_TEXT_FLAG_MULTI_LINE) != 0
-        if ((info.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION) != 0) return SubmitAction("↵", null, multiLine)
-        if (info.actionLabel != null && info.actionId != 0) return SubmitAction(info.actionLabel.toString(), info.actionId, false)
+        if ((info.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION) != 0) return SubmitAction(R.drawable.ic_return, null, null, multiLine)
+        if (info.actionLabel != null && info.actionId != 0) return SubmitAction(R.drawable.ic_return, info.actionLabel.toString(), info.actionId, false)
         val action = info.imeOptions and EditorInfo.IME_MASK_ACTION
-        val label = when (action) {
-            EditorInfo.IME_ACTION_SEARCH -> "🔍"
-            EditorInfo.IME_ACTION_SEND -> "➤"
-            EditorInfo.IME_ACTION_GO -> "➜"
-            EditorInfo.IME_ACTION_NEXT -> "⇥"
-            EditorInfo.IME_ACTION_PREVIOUS -> "⇤"
-            EditorInfo.IME_ACTION_DONE -> "✓"
-            else -> return SubmitAction("↵", null, multiLine)
+        val icon = when (action) {
+            EditorInfo.IME_ACTION_SEARCH -> R.drawable.ic_search
+            EditorInfo.IME_ACTION_SEND -> R.drawable.ic_send
+            EditorInfo.IME_ACTION_GO -> R.drawable.ic_go
+            EditorInfo.IME_ACTION_NEXT -> R.drawable.ic_next
+            EditorInfo.IME_ACTION_PREVIOUS -> R.drawable.ic_previous
+            EditorInfo.IME_ACTION_DONE -> R.drawable.ic_done
+            else -> return SubmitAction(R.drawable.ic_return, null, null, multiLine)
         }
-        return SubmitAction(label, action, false)
+        return SubmitAction(icon, null, action, false)
     }
 
     private fun updateSubmitKey() {
-        if (!::submitKey.isInitialized) return
+        if (!::submitIcon.isInitialized) return
         val action = submitAction(currentInputEditorInfo)
-        submitKey.text = action.label
-        submitKey.textSize = if (action.label.length > 2) 15f else 22f
+        submitIcon.setImageResource(action.icon)
+        submitIcon.visibility = if (action.label == null) View.VISIBLE else View.GONE
+        submitLabel.text = action.label
+        submitLabel.visibility = if (action.label == null) View.GONE else View.VISIBLE
     }
 
     /** While listening it waits for the last result first (up to a few seconds), like Enter on the Mac. */
@@ -638,18 +701,29 @@ class VoiceInputService : InputMethodService() {
         }
     }
 
-    private fun typeSpace() {
-        if (afterFinish != null) return
-        if (state != State.IDLE) pauseNow()
-        currentInputConnection?.commitText(" ", 1)
+    /** The paste chip: the start of the clipboard's text, like Gboard's; just the icon when there is none. */
+    private fun showClipboard() {
+        if (!::clipText.isInitialized) return
+        val clip = runCatching { clipboard.primaryClip }.getOrNull()
+        val sensitive = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            clip?.description?.extras?.getBoolean(ClipDescription.EXTRA_IS_SENSITIVE) == true
+        val text = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
+            ?.replace(WHITESPACE, " ")?.trim().orEmpty()
+        clipText.text = when {
+            text.isEmpty() -> ""
+            sensitive -> "••••••"
+            text.length > CLIP_PREVIEW -> text.take(CLIP_PREVIEW) + "…"
+            else -> text
+        }
+        clipText.visibility = if (text.isEmpty()) View.GONE else View.VISIBLE
     }
 
-    /** 📋 types the clipboard's text as is; if we may not read it, the app pastes it itself. */
+    /** The paste chip types the clipboard's text as is; if we may not read it, the app pastes it itself. */
     private fun pasteClipboard() {
         if (afterFinish != null) return
         if (state != State.IDLE) pauseNow()
         val ic = currentInputConnection ?: return
-        val clip = (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).primaryClip
+        val clip = clipboard.primaryClip
         val text = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
         if (!text.isNullOrEmpty()) ic.commitText(text, 1)
         else if (!ic.performContextMenuAction(android.R.id.paste)) showStatus("Clipboard is empty")
@@ -669,7 +743,7 @@ class VoiceInputService : InputMethodService() {
         emojiPanel.visibility = if (show) View.VISIBLE else View.GONE
         status.visibility = if (show) View.GONE else View.VISIBLE
         micButton.visibility = if (show) View.GONE else View.VISIBLE
-        emojiKey.text = if (show) "🎤" else "😊"
+        emojiKey.setImageResource(if (show) R.drawable.ic_mic else R.drawable.ic_emoji)
     }
 
     private fun emojiRow(emoji: List<String>) = LinearLayout(this).apply {
@@ -739,6 +813,8 @@ class VoiceInputService : InputMethodService() {
         /** How far around the cursor to look for moved composing text when the app gives no extracted text. */
         const val SEARCH_WINDOW = 2000
         val WHITESPACE = Regex("\\s+")
+        /** Characters of the clipboard shown on the paste chip. */
+        const val CLIP_PREVIEW = 24
         const val EMOJI_PER_ROW = 8
         val EMOJI = listOf(
             "😂", "❤️", "🌹", "🙏", "👍", "😍", "😊", "🤣",

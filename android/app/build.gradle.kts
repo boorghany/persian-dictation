@@ -24,7 +24,7 @@ android {
         minSdk = 28 // InputMethodService.switchToPreviousInputMethod()
         targetSdk = 35
         versionCode = buildNumber
-        versionName = "0.26.0"
+        versionName = "0.27.0"
     }
 
     signingConfigs {

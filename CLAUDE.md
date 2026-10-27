@@ -222,15 +222,23 @@ still right before the cursor, or anywhere in the field (the user may have tappe
 first N words (N = words in the last interim) are skipped in its later results (`sentWords`, log
 `composing text removed by the app`). On `onStartInputView(restarting)` the composing region is re-attached if our text
 is still before the cursor, else treated the same way. Unconfirmed on the phone.
-**Keys** (0.25.0): row 1 ⌨ 😊 📋 ◀ ▶ ⌫, row 2 space (␣) and the **submit key**, which follows the field's `imeOptions`
-like Gboard's: 🔍 search, ➤ send, ➜ go, ⇥ next, ⇤ previous, ✓ done, a custom `actionLabel`, and ↵ (newline in
-multi-line fields — chat apps mark their box `IME_FLAG_NO_ENTER_ACTION`, so there it is a newline, like Gboard — else
-a KEYCODE_ENTER key event). It runs `performEditorAction`; while listening it first waits for the last result (like the
-Mac's Enter). Spoken **اینتر** does the same action between the text before and after it, and keeps listening.
-📋 types the clipboard's text (an IME in use may read it), or asks the app to paste (`performContextMenuAction`) if
-it can't. 😊 swaps the status line and mic for a scrollable emoji grid (80 common emoji + a row of the 8 most recent,
-kept in prefs `emoji`); 🎤 there goes back. Gboard's emoji panel can't be opened from another keyboard and there is
-no AndroidX (no EmojiCompat), so emoji rely on the system font. Space, 📋, emoji and opening the picker pause first.
+**Panel** (0.27.0, the user's layout feedback on 0.26.0: one row too sparse, one too cramped, colourful icons broke the
+theme): Gboard-style **toolbar** on top — a flat emoji icon and a **paste chip** showing the clipboard's first 24 characters
+(whitespace collapsed; `••••••` for clips marked `EXTRA_IS_SENSITIVE`; just the icon when the clipboard has no text;
+refreshed on `onStartInputView` and `OnPrimaryClipChangedListener`) — then the status line and mic, then **one key row**:
+⌨ ◀ ▶ ⌫ and the wider **submit key**. The space key was removed (0.27.0). All key icons are monochrome Material vector
+drawables (`res/drawable/ic_*.xml`, Apache 2.0) tinted for light/dark; the delete icon is **mirrored to point right**
+(in Persian deleting eats towards the right). The submit key is filled with Gboard's accent (Material You
+`system_accent1_600` / `_200` on Android 12+, else Google blue) and follows the field's `imeOptions`: search, send, go,
+next, previous, done icons, a custom `actionLabel` as text, else ↵ (newline in multi-line fields — chat apps mark their
+box `IME_FLAG_NO_ENTER_ACTION`, so there it is a newline, like Gboard — else a KEYCODE_ENTER key event). It runs
+`performEditorAction`; while listening it first waits for the last result (like the Mac's Enter). Spoken **اینتر** does
+the same action between the text before and after it, and keeps listening.
+The paste chip types the clipboard's text (an IME in use may read it), or asks the app to paste (`performContextMenuAction`)
+if it can't. The emoji icon swaps the status line and mic for a scrollable emoji grid (80 common emoji + a row of the 8
+most recent, kept in prefs `emoji`); the mic icon in its place goes back. Gboard's emoji panel can't be opened from another
+keyboard and there is no AndroidX (no EmojiCompat), so emoji rely on the system font. Paste, emoji and opening the picker
+pause first. Checked on the emulator (light + dark, Messages and Settings search): layout, chip text, paste, delete-word.
 **Number, phone, date/time and password fields** (0.25.0, `voiceSuitsField`): the keyboard switches straight back to
 the previous one (Gboard) in `onStartInputView` — chosen over a built-in numeric keypad because the user runs this next
 to Gboard anyway, Gboard's number pad is better than anything we'd draw, and a password must never be sent to Google.
