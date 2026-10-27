@@ -292,6 +292,22 @@ namespace stays `local.voice2text…`, so component names are `ir.boorghany.pers
 won't take updates). Store assets in `android/store/` (512 px icon rendered from the Mac `AppIcon` code, emulator screenshots).
 Every Bazaar update needs a higher `versionCode` (= build number).
 Open the Bazaar console in the **built-in browser** pane, not Chrome (the user's request, 2026-10-27); the user signs in there.
+**Publishing an update (how 1.0.2 build 24 was published, 2026-10-27):**
+1. `android/build.sh --release` → `android/dist/PersianDictation-<version>-build<N>-release.apk`; commit + push the build number.
+2. Console: Apps → تایپ صوتی فارسی → side menu (☰ at this pane width) → نسخه‌ها(رهانش‌ها) → **نسخه جدید**.
+3. **Upload: the user drags the APK into the dotted drop box** (`open -R <apk>` shows it in Finder). The built-in browser
+   has no file-upload tool, and every workaround failed: page `fetch` from a localhost server (blocked, even with CORS and
+   private-network headers), a localhost iframe (blocked), `window.open` to a localhost page (it replaces the tab, no
+   opener), a file on the clipboard + synthetic ⌘V (no paste event), and typing a path into the macOS open dialog
+   (`osascript` has no Accessibility access). Check the package row: versionCode (versionName), target/min SDK.
+4. Release notes (تغییرات جدید فارسی / انگلیسی, ≤ 800 chars each, shown publicly — get the user's OK on the text): the
+   editors are plain `contenteditable` divs; typing "- " doesn't make bullets and the list button misbehaves, so set
+   `innerHTML` to `<ul><li>…</li></ul>` and dispatch an `input` event (the `N / ۸۰۰` counters show it registered).
+5. «انتشار خودکار نسخه» on (publishes when approved) → **درخواست انتشار** → confirm «درخواست انتشار برنامه» (reviewer note
+   optional). Review: up to 3 working days, result by email. Status then «در صف انتظار».
+Releases: 0.19.0 (build 20) published 1405/07/27; **1.0.2 (build 24) submitted 2026-10-27** (notes: toolbar with emoji and
+paste, simpler keys and themed icons, keys don't stop dictation, shown words no longer vanish, «علامت تعجب» → !, mid-text
+spacing, no retyping after send, number/password fields open the previous keyboard).
 
 Build & install: `android/build.sh` → bumps `android/build-number.txt`, runs core tests, builds
 `android/dist/PersianDictation-<versionName>-build<N>.apk`, and `adb install -r`s it if a device is connected.
