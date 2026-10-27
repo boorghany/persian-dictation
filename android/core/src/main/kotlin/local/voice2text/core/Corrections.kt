@@ -15,6 +15,7 @@ object Corrections {
         "بورغانی" to "بورقانی",
         "ارزی" to "عرضی",
         "ارز" to "عرض",
+        "ناد" to "نآد",
     )
 
     // A "word" here can contain letters, combining marks and ZWNJ (same rule as SpokenPunctuation).

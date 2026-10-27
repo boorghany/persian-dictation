@@ -57,6 +57,8 @@ class CorrectionsTest {
         assertEquals("نوار عرضی", Corrections.apply("نوار ارزی", "fa-IR"))
         assertEquals("ارزش", Corrections.apply("ارزش", "fa-IR"))
         assertEquals("آقای بورقانی", Corrections.apply("آقای بورغانی", "fa-IR"))
+        assertEquals("شرکت نآد", Corrections.apply("شرکت ناد", "fa-IR"))
+        assertEquals("نادر", Corrections.apply("نادر", "fa-IR"))
     }
 
     @Test fun englishUntouched() = assertEquals("عرشیا", Corrections.apply("عرشیا", "en-US"))
