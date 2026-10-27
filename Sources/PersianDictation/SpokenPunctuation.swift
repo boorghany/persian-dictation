@@ -8,6 +8,7 @@ enum SpokenPunctuation {
         ("پاراگراف بد", "\n\n"), // Google often hears «بعد» as «بد»
         ("علامت سوال", "؟"),
         ("علامت سؤال", "؟"),
+        ("علامت تعجب", "!"),
         ("خط بعد", "\n"),
         ("خط بد", "\n"), // Google often hears «بعد» as «بد»
         ("پرانتز باز", "("),
@@ -16,20 +17,25 @@ enum SpokenPunctuation {
         ("دونقطه", ":"),
         ("نقطه", "."),
         ("ویرگول", "،"),
+        ("اینتر", enter),
     ]
 
+    /// "اینتر" becomes this marker: the app presses Return there instead of typing the word.
+    /// No spaces around it.
+    static let enter = "\r"
+
     /// Attach to the previous word: no space before, one after when a word follows.
-    private static let symbols = ".،؟:)"
+    private static let symbols = ".،؟:)!"
 
     /// Characters that attach to the previous word, so no space goes before them.
     static func attachesToPrevious(_ text: String) -> Bool {
         guard let first = text.first else { return false }
-        return symbols.contains(first) || first == "\n"
+        return symbols.contains(first) || first == "\n" || first == "\r"
     }
 
     /// Text ending like this attaches to whatever comes next, so no space goes after it.
     static func attachesToNext(_ text: String) -> Bool {
-        text.hasSuffix("\n") || text.hasSuffix("(")
+        text.hasSuffix("\n") || text.hasSuffix("(") || text.hasSuffix(enter)
     }
 
     static func apply(_ text: String, language: String) -> String {
@@ -55,6 +61,7 @@ enum SpokenPunctuation {
         s = s.replacingOccurrences(of: "(?<=[^\\s(])\\(", with: " (", options: .regularExpression)
         // No spaces around line breaks.
         s = s.replacingOccurrences(of: "[ \\t]*\\n[ \\t]*", with: "\n", options: .regularExpression)
+        s = s.replacingOccurrences(of: "[ \\t]*\\r[ \\t]*", with: enter, options: .regularExpression)
         return s.trimmingCharacters(in: CharacterSet(charactersIn: " \t"))
     }
 }

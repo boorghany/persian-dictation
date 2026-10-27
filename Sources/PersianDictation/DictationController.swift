@@ -7,6 +7,9 @@ final class DictationController {
     enum State { case idle, listening, finishing }
 
     var onStateChange: ((State) -> Void)?
+    /// true right before a spoken "اینتر" presses Return in the target app, false once it is through:
+    /// the Enter hotkey (stop dictation) must let that Return pass.
+    var onReturnPassThrough: ((Bool) -> Void)?
 
     private(set) var state = State.idle {
         didSet { onStateChange?(state) }
@@ -161,7 +164,8 @@ final class DictationController {
             guard let self else { return }
             let preview = SpokenPunctuation.apply(Corrections.apply(text, language: self.language), language: self.language)
             self.overlay.show(preview.isEmpty ? self.placeholder
-                : (self.pendingBreaks + preview).replacingOccurrences(of: "\n", with: " ↵ "))
+                : (self.pendingBreaks + preview).replacingOccurrences(of: "\n", with: " ↵ ")
+                    .replacingOccurrences(of: SpokenPunctuation.enter, with: " ⏎ "))
         }
         r.onFinal = { [weak self] text in
             guard let self else { return }
@@ -193,6 +197,14 @@ final class DictationController {
 
     private func insert(_ raw: String) {
         let text = SpokenPunctuation.apply(Corrections.apply(raw, language: language), language: language)
+        // "اینتر": paste what came before it, press Return (send in chat apps), then go on.
+        for (i, part) in text.components(separatedBy: SpokenPunctuation.enter).enumerated() {
+            if i > 0 { pressReturn() }
+            insertPart(part)
+        }
+    }
+
+    private func insertPart(_ text: String) {
         guard !text.isEmpty else { return }
         var body = text
         var breaks = ""
@@ -210,6 +222,17 @@ final class DictationController {
         insertedAny = true
         lastInsertAttachesToNext = SpokenPunctuation.attachesToNext(body)
         pendingBreaks = breaks
+    }
+
+    /// A spoken Enter. Line breaks held back are dropped (Return makes its own), and the next text
+    /// starts without a space: the message was sent or a new line begun.
+    private func pressReturn() {
+        DiagnosticsLog.write("spoken Enter")
+        pendingBreaks = ""
+        insertedAny = false
+        lastInsertAttachesToNext = false
+        TextInserter.pressReturnAfterPaste(willPress: { [weak self] in self?.onReturnPassThrough?(true) },
+                                           didPress: { [weak self] in self?.onReturnPassThrough?(false) })
     }
 
     /// Dictation ended right after a line break command: paste it as is.

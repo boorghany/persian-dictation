@@ -10,6 +10,7 @@ enum Corrections {
         ("بورغانی", "بورقانی"),
         ("ارزی", "عرضی"),
         ("ارز", "عرض"),
+        ("ناد", "نآد"),
     ]
 
     static func apply(_ text: String, language: String) -> String {

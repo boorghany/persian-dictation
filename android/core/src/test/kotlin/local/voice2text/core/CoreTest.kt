@@ -28,6 +28,13 @@ class SpokenPunctuationTest {
         "پرانتز بسته" to ")",
         "پاراگراف اول پاراگراف بعد پاراگراف دوم" to "پاراگراف اول\n\nپاراگراف دوم",
         "تموم شد نقطه پاراگراف بد سلام" to "تموم شد.\n\nسلام",
+        "چه عالی علامت تعجب" to "چه عالی!",
+        "عالی علامت تعجب ممنون" to "عالی! ممنون",
+        "وای علامت تعجب علامت تعجب" to "وای!!",
+        "سلام خوبی اینتر" to "سلام خوبی\r",
+        "سلام اینتر خوبی" to "سلام\rخوبی",
+        "اینتر" to "\r",
+        "اینترنت قطعه" to "اینترنت قطعه",
     )
 
     @Test fun persianCommands() {
@@ -42,6 +49,8 @@ class AttachesToNextTest {
         assertEquals(true, SpokenPunctuation.attachesToNext("سلام ("))
         assertEquals(true, SpokenPunctuation.attachesToNext("سلام\n"))
         assertEquals(false, SpokenPunctuation.attachesToNext("سلام)"))
+        assertEquals(true, SpokenPunctuation.attachesToNext("سلام\r"))
+        assertEquals(true, SpokenPunctuation.attachesToPrevious("\rسلام"))
     }
 }
 
@@ -54,6 +63,8 @@ class CorrectionsTest {
         assertEquals("نوار عرضی", Corrections.apply("نوار ارزی", "fa-IR"))
         assertEquals("ارزش", Corrections.apply("ارزش", "fa-IR"))
         assertEquals("آقای بورقانی", Corrections.apply("آقای بورغانی", "fa-IR"))
+        assertEquals("شرکت نآد", Corrections.apply("شرکت ناد", "fa-IR"))
+        assertEquals("نادر", Corrections.apply("نادر", "fa-IR"))
     }
 
     @Test fun englishUntouched() = assertEquals("عرشیا", Corrections.apply("عرشیا", "en-US"))

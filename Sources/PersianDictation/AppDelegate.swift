@@ -28,6 +28,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let developmentItem = NSMenuItem(title: "Development Mode (log + record audio)",
                                              action: #selector(toggleDevelopmentMode), keyEquivalent: "")
 
+    private func registerEnterHotKeys() {
+        enterHotKeys = [kVK_Return, kVK_ANSI_KeypadEnter].compactMap { key in
+            HotKey(keyCode: key, modifiers: 0) { [weak self] in
+                self?.controller.stopKeyPressed(enter: true)
+            }
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.menu = buildMenu()
@@ -39,11 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.escapeHotKey = HotKey(keyCode: kVK_Escape, modifiers: 0) { [weak self] in
                     self?.controller.stopKeyPressed(enter: false)
                 }
-                self.enterHotKeys = [kVK_Return, kVK_ANSI_KeypadEnter].compactMap { key in
-                    HotKey(keyCode: key, modifiers: 0) { [weak self] in
-                        self?.controller.stopKeyPressed(enter: true)
-                    }
-                }
+                self.registerEnterHotKeys()
             case .finishing:
                 self.escapeHotKey = nil
             case .idle:
@@ -51,6 +55,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.enterHotKeys = []
             }
             self.refresh()
+        }
+        // A spoken "اینتر" presses Return in the target app: our own Enter hotkey must not catch it.
+        controller.onReturnPassThrough = { [weak self] passThrough in
+            guard let self else { return }
+            if passThrough {
+                self.enterHotKeys = []
+            } else if self.controller.state != .idle && self.enterHotKeys.isEmpty {
+                self.registerEnterHotKeys()
+            }
         }
 
         // ⌃⌥Space. ⌃Space is left alone because it switches keyboard input sources.

@@ -31,9 +31,22 @@ enum TextInserter {
     /// After the app read the paste, give it this long to insert the text (browsers do it asynchronously).
     private static let insertDelay: TimeInterval = 0.2
 
+    /// A Return press is waiting for the last paste to be read: later pastes wait for the Return,
+    /// or they would land before it (e.g. in the chat box before the message is sent).
+    private static var returnPending = false
+    /// Pastes and Return presses that came while a Return was pending, in order.
+    private static var afterReturn: [() -> Void] = []
+    /// How long after posting Return before [pressReturnAfterPaste]'s `didPress` runs (the Enter
+    /// hotkey is registered again then, and must not catch our own Return).
+    private static let returnDelivery: TimeInterval = 0.25
+
     /// Main thread only.
     static func insert(_ text: String) {
         guard !text.isEmpty else { return }
+        if returnPending {
+            afterReturn.append { insert(text) }
+            return
+        }
         let pasteboard = NSPasteboard.general
         restore?.cancel()
         if saved == nil { saved = snapshot(pasteboard) }
@@ -81,6 +94,7 @@ enum TextInserter {
                 if !readWaiters.isEmpty { DiagnosticsLog.write("paste never read; not pressing Enter") }
                 readWaiters = []
                 Self.unread = false
+                if returnPending { DispatchQueue.main.async { returnDone() } }
             }
             // Don't clobber something the user copied in the meantime.
             guard pasteboard.changeCount == changeCount, let saved else { return }
@@ -104,16 +118,39 @@ enum TextInserter {
     }
 
     /// Press Return in the focused app once it has inserted the last paste. Main thread only.
-    static func pressReturnAfterPaste() {
+    /// `willPress` runs right before the key is posted, `didPress` a moment after it was delivered
+    /// (also when it isn't pressed because the paste was never read).
+    static func pressReturnAfterPaste(willPress: (() -> Void)? = nil, didPress: (() -> Void)? = nil) {
+        if returnPending {
+            afterReturn.append { pressReturnAfterPaste(willPress: willPress, didPress: didPress) }
+            return
+        }
+        returnPending = true
+        returnDidPress = didPress
         let press = {
+            willPress?()
             DiagnosticsLog.write("pressing Enter after the last paste")
             sendKey(36) // kVK_Return
+            DispatchQueue.main.asyncAfter(deadline: .now() + returnDelivery) { returnDone() }
         }
         if unread {
             readWaiters.append(press)
         } else {
             DispatchQueue.main.asyncAfter(deadline: .now() + insertDelay, execute: press)
         }
+    }
+
+    private static var returnDidPress: (() -> Void)?
+
+    /// The Return was delivered (or dropped): paste what waited for it.
+    private static func returnDone() {
+        guard returnPending else { return }
+        returnPending = false
+        let done = returnDidPress
+        returnDidPress = nil
+        done?()
+        // Stops at the next Return, which queues the rest again until it is through.
+        while !returnPending && !afterReturn.isEmpty { afterReturn.removeFirst()() }
     }
 
     private static func sendCommandV() {
