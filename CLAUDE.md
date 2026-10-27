@@ -291,6 +291,7 @@ namespace stays `local.voice2text…`, so component names are `ir.boorghany.pers
 (+ `keystore.properties` with the passwords; both git-ignored — **the user must back them up**, without them Bazaar
 won't take updates). Store assets in `android/store/` (512 px icon rendered from the Mac `AppIcon` code, emulator screenshots).
 Every Bazaar update needs a higher `versionCode` (= build number).
+Open the Bazaar console in the **built-in browser** pane, not Chrome (the user's request, 2026-10-27); the user signs in there.
 
 Build & install: `android/build.sh` → bumps `android/build-number.txt`, runs core tests, builds
 `android/dist/PersianDictation-<versionName>-build<N>.apk`, and `adb install -r`s it if a device is connected.
