@@ -25,6 +25,12 @@ enum TextInserter {
     /// Nobody read it (the paste didn't happen): restore anyway.
     private static let maximumHold: TimeInterval = 5
 
+    /// Whether the target app hasn't read the latest paste yet, and what to do once it has.
+    private static var unread = false
+    private static var readWaiters: [() -> Void] = []
+    /// After the app read the paste, give it this long to insert the text (browsers do it asynchronously).
+    private static let insertDelay: TimeInterval = 0.2
+
     /// Main thread only.
     static func insert(_ text: String) {
         guard !text.isEmpty else { return }
@@ -37,8 +43,15 @@ enum TextInserter {
         // the user's clipboard was already back, and nothing was pasted (the Edit menu still flashed).
         let sent = Date()
         var changeCount = 0 // set after writing; captured by reference
+        unread = true
         let provider = PasteProvider(text: text) { requestedAt in
             DiagnosticsLog.verbose(String(format: "paste read after %.0f ms", requestedAt.timeIntervalSince(sent) * 1000))
+            unread = false
+            let waiters = readWaiters
+            readWaiters = []
+            if !waiters.isEmpty {
+                DispatchQueue.main.asyncAfter(deadline: .now() + insertDelay) { waiters.forEach { $0() } }
+            }
             scheduleRestore(at: max(sent.addingTimeInterval(minimumHold), requestedAt.addingTimeInterval(afterRead)),
                             changeCount: changeCount)
         }
@@ -62,7 +75,13 @@ enum TextInserter {
             provider = nil
             let pasteboard = NSPasteboard.general
             defer { saved = nil }
-            if unread { DiagnosticsLog.verbose("paste never read; restoring the clipboard") }
+            if unread {
+                DiagnosticsLog.verbose("paste never read; restoring the clipboard")
+                // The paste didn't happen, so don't press Enter: it would send the message without it.
+                if !readWaiters.isEmpty { DiagnosticsLog.write("paste never read; not pressing Enter") }
+                readWaiters = []
+                Self.unread = false
+            }
             // Don't clobber something the user copied in the meantime.
             guard pasteboard.changeCount == changeCount, let saved else { return }
             pasteboard.clearContents()
@@ -84,13 +103,29 @@ enum TextInserter {
         }
     }
 
+    /// Press Return in the focused app once it has inserted the last paste. Main thread only.
+    static func pressReturnAfterPaste() {
+        let press = {
+            DiagnosticsLog.write("pressing Enter after the last paste")
+            sendKey(36) // kVK_Return
+        }
+        if unread {
+            readWaiters.append(press)
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + insertDelay, execute: press)
+        }
+    }
+
     private static func sendCommandV() {
+        sendKey(9, flags: .maskCommand) // kVK_ANSI_V
+    }
+
+    private static func sendKey(_ key: CGKeyCode, flags: CGEventFlags = []) {
         let source = CGEventSource(stateID: .combinedSessionState)
-        let vKey: CGKeyCode = 9 // kVK_ANSI_V
-        let down = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: true)
-        let up = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: false)
-        down?.flags = .maskCommand
-        up?.flags = .maskCommand
+        let down = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: true)
+        let up = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: false)
+        down?.flags = flags
+        up?.flags = flags
         down?.post(tap: .cghidEventTap)
         up?.post(tap: .cghidEventTap)
     }

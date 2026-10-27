@@ -21,6 +21,10 @@ final class DictationController {
     /// drop or hide a line break at the very end of pasted text, so "پاراگراف بعد" became one line
     /// break. They are pasted at the start of the next final instead, or when dictation ends.
     private var pendingBreaks = ""
+    /// Enter was pressed again while finishing ("paste the rest, then send"): press it in the target
+    /// app once the last words are pasted. Before, that Enter reached the app at once and sent the
+    /// message without the words Google hadn't finalized yet.
+    private var pressEnterWhenDone = false
     private var finishTimeout: DispatchWorkItem?
     private var dictationStart = Date()
     private var gotFirstAudio = false
@@ -35,8 +39,21 @@ final class DictationController {
     func toggle() {
         switch state {
         case .idle: start()
-        case .listening: stop()
+        case .listening: stop(by: "hotkey or menu")
         case .finishing: break
+        }
+    }
+
+    /// Esc or Enter while dictating.
+    func stopKeyPressed(enter: Bool) {
+        switch state {
+        case .listening:
+            stop(by: enter ? "Enter" : "Esc")
+        case .finishing where enter && !pressEnterWhenDone:
+            DiagnosticsLog.write("Enter while finishing: pressing it after the last paste")
+            pressEnterWhenDone = true
+        default:
+            break
         }
     }
 
@@ -64,6 +81,7 @@ final class DictationController {
         insertedAny = false
         lastInsertAttachesToNext = false
         pendingBreaks = ""
+        pressEnterWhenDone = false
         dictationStart = Date()
         gotFirstAudio = false
         let mics = AudioCapture.microphones().map(\.localizedName).joined(separator: ", ")
@@ -102,7 +120,8 @@ final class DictationController {
         state = .listening
     }
 
-    private func stop() {
+    private func stop(by key: String) {
+        DiagnosticsLog.write("dictation stop (\(key))")
         audio?.stop()
         audio = nil
         state = .finishing
@@ -125,7 +144,11 @@ final class DictationController {
         finishTimeout = nil
         recognizer = nil
         overlay.hide()
-        state = .idle
+        state = .idle // unregisters our Enter hotkey before we press Enter below
+        if pressEnterWhenDone {
+            pressEnterWhenDone = false
+            TextInserter.pressReturnAfterPaste()
+        }
     }
 
     // MARK: Streaming
@@ -141,7 +164,10 @@ final class DictationController {
                 : (self.pendingBreaks + preview).replacingOccurrences(of: "\n", with: " ↵ "))
         }
         r.onFinal = { [weak self] text in
-            self?.insert(text)
+            guard let self else { return }
+            self.insert(text)
+            // It's pasted now: don't keep showing it until the next session's first interim (up to ~1 s).
+            if self.state == .listening { self.overlay.show(self.placeholder) }
         }
         r.onEnd = { [weak self] error in
             guard let self else { return }

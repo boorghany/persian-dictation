@@ -127,6 +127,14 @@ Swift package `PersianDictation`, macOS 13+, built with Command Line Tools (no X
 Features: ⌃⌥Space toggles dictation (⌃Space is left for input-source switching). While listening only,
 **Esc** and **Enter** (main or keypad) stop, finalize and paste; **Shift+Enter** is not intercepted
 (Carbon hotkeys match exact modifiers). Enter does *not* send in chat apps — offered as an option, not built.
+**Enter, Enter = paste the rest, then send** (0.22.0): after the first Enter the app waits (0.1–6 s) for
+Google's last final. Before, Enter was only caught while listening, so a quick second Enter reached the chat
+app and sent the message without the last words, which were then pasted into the empty box. Now Enter stays
+registered while finishing; pressed again, it is pressed in the target app (`TextInserter.pressReturnAfterPaste`)
+200 ms after the app read the last paste — not if the paste was never read. Log: `dictation stop (Enter|Esc|…)`,
+`Enter while finishing…`, `pressing Enter after the last paste`.
+The overlay goes back to the placeholder as soon as a final is pasted (0.22.0); before, the pasted text stayed
+there up to ~1 s, until the next session's first interim, and looked like the removed early-paste feature.
 **Tried and removed:** pasting the interim's stable words after a 0.6 s pause, before Google's final
 (0.16.0, commit 82b358a). It didn't work well in practice, so 0.20.0 reverted it; only finals are pasted.
 Language menu (fa-IR / en-US). Version shown as the first menu line, e.g. "Persian Dictation 0.2.0 (build 8)".

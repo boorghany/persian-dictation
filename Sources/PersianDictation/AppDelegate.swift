@@ -11,8 +11,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                                   keyEquivalent: "")
     private var hotKey: HotKey?
     /// Escape and Enter stop dictation (pasting what was said). Registered only while listening,
-    /// so these keys behave normally otherwise.
-    private var stopHotKeys: [HotKey] = []
+    /// so these keys behave normally otherwise. Enter stays registered while finishing: pressed again
+    /// then, it is sent to the app after the last words are pasted.
+    private var escapeHotKey: HotKey?
+    private var enterHotKeys: [HotKey] = []
 
     private let statusLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let toggleItem = NSMenuItem(title: "", action: #selector(toggle), keyEquivalent: " ")
@@ -32,15 +34,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         controller.onStateChange = { [weak self] state in
             guard let self else { return }
-            if state == .listening {
-                self.stopHotKeys = [kVK_Escape, kVK_Return, kVK_ANSI_KeypadEnter].compactMap { key in
+            switch state {
+            case .listening:
+                self.escapeHotKey = HotKey(keyCode: kVK_Escape, modifiers: 0) { [weak self] in
+                    self?.controller.stopKeyPressed(enter: false)
+                }
+                self.enterHotKeys = [kVK_Return, kVK_ANSI_KeypadEnter].compactMap { key in
                     HotKey(keyCode: key, modifiers: 0) { [weak self] in
-                        guard self?.controller.state == .listening else { return }
-                        self?.controller.toggle()
+                        self?.controller.stopKeyPressed(enter: true)
                     }
                 }
-            } else {
-                self.stopHotKeys = []
+            case .finishing:
+                self.escapeHotKey = nil
+            case .idle:
+                self.escapeHotKey = nil
+                self.enterHotKeys = []
             }
             self.refresh()
         }
