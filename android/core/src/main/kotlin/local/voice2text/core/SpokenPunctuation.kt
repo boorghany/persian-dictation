@@ -20,10 +20,17 @@ object SpokenPunctuation {
         "دونقطه" to ":",
         "نقطه" to ".",
         "ویرگول" to "،",
+        "اینتر" to ENTER.toString(),
     )
 
+    /**
+     * "اینتر" becomes this marker: the app presses Enter / the field's action (send, search…) there
+     * instead of typing the word. No spaces around it.
+     */
+    const val ENTER = '\r'
+
     /** Attach to the previous word: no space before, one after when a word follows. */
-    private const val SYMBOLS = ".،؟:)!"
+    const val SYMBOLS = ".،؟:)!"
 
     // A "word" here can contain letters, combining marks and ZWNJ, so "نقطه‌ی" is left alone.
     private const val NOT_WORD_BEFORE = "(?<![\\p{L}\\p{M}\\u200C])"
@@ -37,11 +44,11 @@ object SpokenPunctuation {
     /** Characters that attach to the previous word, so no space goes before them. */
     fun attachesToPrevious(text: String): Boolean {
         val first = text.firstOrNull() ?: return false
-        return first in SYMBOLS || first == '\n'
+        return first in SYMBOLS || first == '\n' || first == ENTER
     }
 
     /** Text ending like this attaches to whatever comes next, so no space goes after it. */
-    fun attachesToNext(text: String) = text.endsWith('\n') || text.endsWith('(')
+    fun attachesToNext(text: String) = text.endsWith('\n') || text.endsWith('(') || text.endsWith(ENTER)
 
     fun apply(text: String, language: String): String {
         if (!language.startsWith("fa")) return text
@@ -56,6 +63,7 @@ object SpokenPunctuation {
         s = s.replace(Regex("(?<=[^\\s(])\\("), " (")
         // No spaces around line breaks.
         s = s.replace(Regex("[ \\t]*\\n[ \\t]*"), "\n")
+        s = s.replace(Regex("[ \\t]*\r[ \\t]*"), ENTER.toString())
         return s.trim(' ', '\t')
     }
 }

@@ -31,6 +31,10 @@ class SpokenPunctuationTest {
         "چه عالی علامت تعجب" to "چه عالی!",
         "عالی علامت تعجب ممنون" to "عالی! ممنون",
         "وای علامت تعجب علامت تعجب" to "وای!!",
+        "سلام خوبی اینتر" to "سلام خوبی\r",
+        "سلام اینتر خوبی" to "سلام\rخوبی",
+        "اینتر" to "\r",
+        "اینترنت قطعه" to "اینترنت قطعه",
     )
 
     @Test fun persianCommands() {
@@ -45,6 +49,8 @@ class AttachesToNextTest {
         assertEquals(true, SpokenPunctuation.attachesToNext("سلام ("))
         assertEquals(true, SpokenPunctuation.attachesToNext("سلام\n"))
         assertEquals(false, SpokenPunctuation.attachesToNext("سلام)"))
+        assertEquals(true, SpokenPunctuation.attachesToNext("سلام\r"))
+        assertEquals(true, SpokenPunctuation.attachesToPrevious("\rسلام"))
     }
 }
 

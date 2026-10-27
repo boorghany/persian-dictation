@@ -103,7 +103,14 @@ All found from real recordings; the Android `core` module is a line-by-line port
    start of the next final, or alone when dictation ends. Many editors (the browser, Quill-based ones) drop
    or hide a line break at the very end of pasted text, so a "پاراگراف بعد" pasted on its own (`\n\n`)
    showed as one line break and the user had to say "خط بعد" again (log 2026-10-22 00:33, 00:37).
-   Known gaps: literal "خط بد" becomes a newline; "۲ نقطه" written with a digit isn't converted.
+   **اینتر → Enter** (0.25.0): the word becomes the marker `\r` (`SpokenPunctuation.ENTER` / `.enter`, no spaces
+   around it); the text before it is inserted, then Enter is pressed, then the rest. Mac: Return is pressed in the
+   target app after the paste is read (`TextInserter.pressReturnAfterPaste`, the same path as "Enter, Enter"), held-back
+   line breaks are dropped, the next final gets no leading space; our own Enter hotkey is unregistered around the
+   synthetic Return (`DictationController.onReturnPassThrough`, re-registered 0.25 s after posting) or it would stop
+   dictation, and pastes that come while a Return is pending wait for it (order paste → Return → paste is kept).
+   Dictation keeps listening. Android: the keyboard's submit action (see Android IME behaviour).
+   Known gaps: literal "خط بد" becomes a newline; the word "اینتر" can't be typed; "۲ نقطه" written with a digit isn't converted.
 
 ## macOS app (repo root)
 
@@ -249,5 +256,4 @@ replayed in a single continuous session; the old buggy outputs were ی‌خوا�
 ## Open ideas
 
 - Test on the phone (real mic, HyperOS) and iterate from its log/recordings.
-- Mac: optionally press Enter after the final paste (send in chat apps).
 - Handle "۲ نقطه" (digit) and a way to say "خط بد" literally, if they come up.
