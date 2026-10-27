@@ -36,6 +36,12 @@ object AppLog {
         if (file != null) return
         val dir = context.getExternalFilesDir(null) ?: context.filesDir
         file = File(dir, "PersianDictation.log")
+        // A crash closes the keyboard with no trace in our log; record where (no user text is in a stack trace).
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, e ->
+            write("crash in ${thread.name}: $e\n  " + e.stackTrace.take(8).joinToString("\n  "))
+            previous?.uncaughtException(thread, e)
+        }
     }
 
     /** Development-mode test hook: if this file exists, it is played instead of the microphone. */

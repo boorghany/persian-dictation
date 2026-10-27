@@ -19,7 +19,8 @@ Personal use at first; since 2026-10-19 the Android app is also being published 
   asked for a build, set the Android `versionName` to the current Mac version, build, and reveal the APK.
 - **Bump the version, not just the build number**, for every change you ship. Since 2026-10-27 the version is
   **1.0.1** on both apps (the user's choice) and counts up from there: the last number (1.0.1 → 1.0.2) for each
-  fix or feature, the middle one for big changes; Mac and Android share the number. Mac: `CFBundleShortVersionString` in `Resources/Info.plist`;
+  fix or feature, the middle one for big changes. Mac and Android share the sequence: a change to one app takes the
+  next free number (Android 1.0.2 while the Mac stays 1.0.1 until its next change, which is then 1.0.3). Mac: `CFBundleShortVersionString` in `Resources/Info.plist`;
   Android: `versionName` in `android/app/build.gradle*`. The build scripts only bump the build number.
 - **Commit every change** to the local git repo (branch `main`, created 2026-10-08) after it builds and its
   tests/replays pass: one commit per change, message says what and why, version in the subject when bumped.
@@ -223,6 +224,17 @@ still right before the cursor, or anywhere in the field (the user may have tappe
 first N words (N = words in the last interim) are skipped in its later results (`sentWords`, log
 `composing text removed by the app`). On `onStartInputView(restarting)` the composing region is re-attached if our text
 is still before the cursor, else treated the same way. Unconfirmed on the phone.
+**Switching from Gboard** (1.0.2): the user's phone has 3-button navigation (HyperOS shows no keyboard-switcher button
+in the navigation bar; the emulator's gesture bar does, and it opens the picker: 2 taps) and Gboard's 🌐 language
+switch key on (emoji key off). They had to long-press space and pick us. `method.xml` now sets
+`supportsSwitchingToNextInputMethod="true"` (it was false): Android's next-keyboard rotation (`switchToNextInputMethod`,
+what 🌐 uses) only includes keyboards that declare it. Unverified: the emulator's Gboard has one language and shows no 🌐;
+check on the phone whether a 🌐 tap (after Gboard's own languages) reaches us. ⌨ in our panel goes back to Gboard.
+**Keyboard sometimes gone after switching** (reported 2026-10-27 on the phone, not reproduced on the emulator): the log now
+records `start input …`, `keyboard shown` / `hidden`, `ime destroyed` and uncaught crashes (`AppLog.init`, stack only,
+no text). Safety net: within 5 s of the service being created (= the user just switched to it), if the keyboard isn't on
+screen 700 ms after input starts, `requestShowSelf` (log `not shown … asking to show it`). The clipboard preview can't
+crash the panel any more (`coerceToText` of a content-URI clip is guarded).
 **Keys don't stop dictation** (1.0.1, the user's request: only the first opening, which is paused, and their own
 pause stop it). ◀ ▶ ⌫, paste and typing an emoji (opening the picker no longer pauses) first `detachComposing`: the
 utterance in progress is typed in as shown and its shown words are skipped in that utterance's later results (`sentWords`,

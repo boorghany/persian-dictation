@@ -83,6 +83,10 @@ class VoiceInputService : InputMethodService() {
     /** The field's selection, from onUpdateSelection: fallback when the app gives no extracted text. */
     private var selStart = -1
     private var selEnd = -1
+    /** When this keyboard was created: the system creates it when the user switches to it. */
+    private var createdAt = 0L
+    /** Shows the keyboard if switching to it left no keyboard on screen (see [onStartInput]). */
+    private var showCheck: Runnable? = null
     /** Bottom padding that keeps the keys above the navigation bar. */
     private var bottomInset = -1
 
@@ -90,6 +94,7 @@ class VoiceInputService : InputMethodService() {
         super.onCreate()
         AppLog.init(this)
         AppLog.write("ime created version=\"${versionDisplay(this)}\"")
+        createdAt = System.currentTimeMillis()
         clipboard.addPrimaryClipChangedListener(clipListener)
     }
 
@@ -247,6 +252,40 @@ class VoiceInputService : InputMethodService() {
         return if (id != 0) resources.getDimensionPixelSize(id) else 0
     }
 
+    /**
+     * The user reported (2026-10-27, HyperOS) that switching from Gboard to this keyboard sometimes left no
+     * keyboard at all until they tapped the field again; not reproduced on the emulator. Right after a switch
+     * (this service was just created), if the keyboard isn't on screen shortly after input starts, ask to show it.
+     * Logged, without text, to find out more.
+     */
+    override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
+        super.onStartInput(attribute, restarting)
+        val sinceCreated = System.currentTimeMillis() - createdAt
+        AppLog.write("start input restarting=$restarting field=${attribute?.packageName} type=0x${Integer.toHexString(attribute?.inputType ?: 0)} shown=$isInputViewShown sinceCreated=${sinceCreated}ms")
+        showCheck?.let { main.removeCallbacks(it) }
+        showCheck = null
+        if (restarting || sinceCreated > SWITCH_WINDOW_MS || attribute == null || attribute.inputType == InputType.TYPE_NULL) return
+        val check = Runnable {
+            showCheck = null
+            if (!isInputViewShown) {
+                AppLog.write("not shown ${SHOW_CHECK_MS} ms after switching to this keyboard; asking to show it")
+                requestShowSelf(0)
+            }
+        }
+        showCheck = check
+        main.postDelayed(check, SHOW_CHECK_MS)
+    }
+
+    override fun onWindowShown() {
+        super.onWindowShown()
+        AppLog.write("keyboard shown")
+    }
+
+    override fun onWindowHidden() {
+        super.onWindowHidden()
+        AppLog.write("keyboard hidden")
+    }
+
     /** Opens paused: the user taps 🎤 to start. */
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
@@ -298,6 +337,8 @@ class VoiceInputService : InputMethodService() {
     }
 
     override fun onDestroy() {
+        AppLog.write("ime destroyed")
+        showCheck?.let { main.removeCallbacks(it) }
         clipboard.removePrimaryClipChangedListener(clipListener)
         stopEverything()
         super.onDestroy()
@@ -753,10 +794,11 @@ class VoiceInputService : InputMethodService() {
     /** The paste chip: the start of the clipboard's text, like Gboard's; just the icon when there is none. */
     private fun showClipboard() {
         if (!::clipText.isInitialized) return
+        // Never let the clipboard crash the keyboard (a content-URI clip is read through its provider).
         val clip = runCatching { clipboard.primaryClip }.getOrNull()
         val sensitive = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             clip?.description?.extras?.getBoolean(ClipDescription.EXTRA_IS_SENSITIVE) == true
-        val text = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
+        val text = runCatching { clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString() }.getOrNull()
             ?.replace(WHITESPACE, " ")?.trim().orEmpty()
         clipText.text = when {
             text.isEmpty() -> ""
@@ -860,6 +902,10 @@ class VoiceInputService : InputMethodService() {
         /** How far around the cursor to look for moved composing text when the app gives no extracted text. */
         const val SEARCH_WINDOW = 2000
         val WHITESPACE = Regex("\\s+")
+        /** How soon after this keyboard was created an input start counts as "the user just switched to it". */
+        const val SWITCH_WINDOW_MS = 5_000L
+        /** How long after that input start the keyboard should be on screen. */
+        const val SHOW_CHECK_MS = 700L
         /** How long the submit key waits for the final of the utterance on screen while listening. */
         const val SUBMIT_WAIT_MS = 3_000L
         /** Characters of the clipboard shown on the paste chip. */

@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- A voice-only input method used next to Gboard: no subtypes, so it shows up as one entry
-     in the system keyboard picker. -->
+     in the system keyboard picker. supportsSwitchingToNextInputMethod: Gboard's 🌐 key cycles only
+     through keyboards that declare it, so without it the user had to long-press space and pick us. -->
 <input-method xmlns:android="http://schemas.android.com/apk/res/android"
     android:settingsActivity="local.voice2text.persiandictation.SetupActivity"
-    android:supportsSwitchingToNextInputMethod="false" />
+    android:supportsSwitchingToNextInputMethod="true" />
