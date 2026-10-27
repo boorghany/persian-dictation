@@ -11,6 +11,7 @@ object SpokenPunctuation {
         "پاراگراف بد" to "\n\n", // Google often hears «بعد» as «بد»
         "علامت سوال" to "؟",
         "علامت سؤال" to "؟",
+        "علامت تعجب" to "!",
         "خط بعد" to "\n",
         "خط بد" to "\n", // Google often hears «بعد» as «بد»
         "پرانتز باز" to "(",
@@ -22,7 +23,7 @@ object SpokenPunctuation {
     )
 
     /** Attach to the previous word: no space before, one after when a word follows. */
-    private const val SYMBOLS = ".،؟:)"
+    private const val SYMBOLS = ".،؟:)!"
 
     // A "word" here can contain letters, combining marks and ZWNJ, so "نقطه‌ی" is left alone.
     private const val NOT_WORD_BEFORE = "(?<![\\p{L}\\p{M}\\u200C])"

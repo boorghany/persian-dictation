@@ -93,7 +93,7 @@ All found from real recordings; the Android `core` module is a line-by-line port
    preview and final): fixed whole-word replacements for words Google writes differently from how the user
    wants them — currently عرشیا → ارشیا, بورغانی → بورقانی (names), ارز → عرض, ارزی → عرضی (the user means width, never currency). Add new entries to both `Corrections.swift` and `.kt`.
 6. **Spoken punctuation** (`SpokenPunctuation`, Persian only), longest phrase first, whole words only
-   ("نقطه‌ی" untouched): علامت سوال / علامت سؤال → `؟`, پاراگراف بعد / پاراگراف بد → two newlines,
+   ("نقطه‌ی" untouched): علامت سوال / علامت سؤال → `؟`, علامت تعجب → `!`, پاراگراف بعد / پاراگراف بد → two newlines,
    خط بعد / خط بد (Google mishears بعد) → newline,
    دو نقطه / دونقطه → `:`, نقطه → `.`, ویرگول → `،`, پرانتز باز → `(`, پرانتز بسته → `)`. No space before
    symbols (incl. `)`), one after if a word follows (decimals and times like 10:30 untouched); `(` gets a space

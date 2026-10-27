@@ -8,6 +8,7 @@ enum SpokenPunctuation {
         ("پاراگراف بد", "\n\n"), // Google often hears «بعد» as «بد»
         ("علامت سوال", "؟"),
         ("علامت سؤال", "؟"),
+        ("علامت تعجب", "!"),
         ("خط بعد", "\n"),
         ("خط بد", "\n"), // Google often hears «بعد» as «بد»
         ("پرانتز باز", "("),
@@ -19,7 +20,7 @@ enum SpokenPunctuation {
     ]
 
     /// Attach to the previous word: no space before, one after when a word follows.
-    private static let symbols = ".،؟:)"
+    private static let symbols = ".،؟:)!"
 
     /// Characters that attach to the previous word, so no space goes before them.
     static func attachesToPrevious(_ text: String) -> Bool {
