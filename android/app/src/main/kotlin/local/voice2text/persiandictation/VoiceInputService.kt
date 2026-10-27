@@ -38,7 +38,8 @@ import local.voice2text.core.SpokenPunctuation
  * progress goes into the text field as composing (underlined) text and each finalized utterance is
  * committed. ⌫ deletes and ◀ ▶ move by whole words; ⌨ switches back to the previous keyboard (Gboard);
  * the submit key does the field's action (send, search…) like Gboard's. A toolbar above, as in Gboard:
- * emoji picker and a paste chip showing the start of the clipboard text. Monochrome Material icons tinted
+ * emoji picker and a paste chip showing the start of the clipboard text. Keys don't stop dictation: only the
+ * user's own pause does (and it opens paused). Monochrome Material icons tinted
  * for the light/dark theme. Number, phone, date and password fields go straight back to the previous keyboard.
  */
 class VoiceInputService : InputMethodService() {
@@ -53,6 +54,8 @@ class VoiceInputService : InputMethodService() {
     /** Runs once the last result is committed after stopping (e.g. press Enter, return to Gboard). */
     private var afterFinish: (() -> Unit)? = null
     private var finishTimeout: Runnable? = null
+    /** The submit key was pressed while listening: submit once the utterance on screen is final (or after a few seconds). */
+    private var submitWhenFinal: Runnable? = null
     /** The text around the cursor where the utterance is being composed; set when composing starts. */
     private var composingGap: Gap? = null
     /** Exactly what was last passed to setComposingText, to notice when the app removed it. */
@@ -373,6 +376,7 @@ class VoiceInputService : InputMethodService() {
     private fun recognizerEnded(error: Throwable?) {
         finishTimeout?.let { main.removeCallbacks(it) }
         finishTimeout = null
+        submitWhenFinal?.let { main.removeCallbacks(it); submitWhenFinal = null; afterFinish = afterFinish ?: { submit() } }
         mic?.stop()
         mic = null
         recognizer = null
@@ -388,6 +392,31 @@ class VoiceInputService : InputMethodService() {
         val next = afterFinish
         afterFinish = null
         next?.invoke()
+    }
+
+    /**
+     * Before a key edits the text or moves the cursor (◀ ▶ ⌫, paste, emoji). While listening, dictation goes on
+     * (the user's request, 2026-10-27: only the first opening and their own pause stop it): the utterance in
+     * progress is typed in as shown, and the rest of it goes where the cursor is then ([detachComposing]).
+     * While finishing after the user paused, the last result isn't waited for.
+     */
+    private fun beforeEdit() = when (state) {
+        State.LISTENING -> detachComposing()
+        State.FINISHING -> pauseNow()
+        State.IDLE -> {}
+    }
+
+    /**
+     * Leave the utterance in progress where it is: its composing text becomes plain text, and the words shown
+     * so far are skipped in its later results (see [sentWords]), so a deleted word doesn't come back and
+     * nothing is typed twice. What Google hears next is composed at the cursor.
+     */
+    private fun detachComposing() {
+        if (composingShown == null) return
+        currentInputConnection?.finishComposingText()
+        sentWords = maxOf(sentWords, lastInterim.trim().split(WHITESPACE).count { it.isNotEmpty() })
+        endComposing()
+        AppLog.write("composing text left in place; still listening (skipping the utterance's first $sentWords words)")
     }
 
     /** Pause immediately: keep the text shown so far (no waiting for Google's final result). */
@@ -424,6 +453,8 @@ class VoiceInputService : InputMethodService() {
     private fun stopEverything() {
         finishTimeout?.let { main.removeCallbacks(it) }
         finishTimeout = null
+        submitWhenFinal?.let { main.removeCallbacks(it) }
+        submitWhenFinal = null
         afterFinish = null
         mic?.stop()
         mic = null
@@ -475,6 +506,7 @@ class VoiceInputService : InputMethodService() {
             }
             commitText(ic, part)
         }
+        submitWhenFinal?.let { main.removeCallbacks(it); submitWhenFinal = null; submit() }
         if (state != State.IDLE) showStatus(if (state == State.LISTENING) "در حال گوش دادن…" else "…")
     }
 
@@ -573,13 +605,12 @@ class VoiceInputService : InputMethodService() {
      * with the spaces before it, keeping one space if words remain on both sides. A line break before
      * the cursor is deleted on its own, a selection as a whole.
      *
-     * While listening, or while waiting for the last result after a pause, it first pauses: the text
-     * shown so far is typed in as it is and the recognizer is stopped, so the deletion isn't undone by
-     * a later result.
+     * While listening, the text shown so far is typed in as it is and listening goes on; its words are
+     * skipped in later results, so the deletion isn't undone ([beforeEdit]).
      */
     private fun backspace() {
         if (afterFinish != null) return
-        if (state != State.IDLE) pauseNow()
+        beforeEdit()
         val ic = currentInputConnection ?: return
         if (!ic.getSelectedText(0).isNullOrEmpty()) { ic.commitText("", 1); return }
         val before = ic.getTextBeforeCursor(WORD_WINDOW, 0)?.toString()
@@ -604,7 +635,7 @@ class VoiceInputService : InputMethodService() {
     /** ◀ ▶: move the cursor to the start of the previous word or the end of the next one. */
     private fun moveWord(back: Boolean) {
         if (afterFinish != null) return
-        if (state != State.IDLE) pauseNow()
+        beforeEdit()
         val ic = currentInputConnection ?: return
         val (start, end) = selection(ic) ?: return
         val offset = if (back) {
@@ -682,10 +713,28 @@ class VoiceInputService : InputMethodService() {
     private fun submitKeyPressed() {
         if (afterFinish != null) return
         when (state) {
-            State.LISTENING -> stopListening { submit() }
+            State.LISTENING -> submitAfterUtterance()
             State.FINISHING -> afterFinish = { submit() }
             State.IDLE -> submit()
         }
+    }
+
+    /**
+     * Listening goes on (only the user's own pause stops it). If an utterance is on screen, wait for its final
+     * (more accurate than the interim, usually within a second of the user stopping) and submit after typing it;
+     * if it doesn't come within [SUBMIT_WAIT_MS], type what is shown and submit.
+     */
+    private fun submitAfterUtterance() {
+        if (submitWhenFinal != null) return
+        if (composingShown.isNullOrEmpty()) { submit(); return }
+        val timeout = Runnable {
+            submitWhenFinal = null
+            AppLog.write("no final within ${SUBMIT_WAIT_MS} ms; submitting what was shown")
+            detachComposing()
+            submit()
+        }
+        submitWhenFinal = timeout
+        main.postDelayed(timeout, SUBMIT_WAIT_MS)
     }
 
     private fun submit() {
@@ -721,7 +770,7 @@ class VoiceInputService : InputMethodService() {
     /** The paste chip types the clipboard's text as is; if we may not read it, the app pastes it itself. */
     private fun pasteClipboard() {
         if (afterFinish != null) return
-        if (state != State.IDLE) pauseNow()
+        beforeEdit()
         val ic = currentInputConnection ?: return
         val clip = clipboard.primaryClip
         val text = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
@@ -735,11 +784,7 @@ class VoiceInputService : InputMethodService() {
 
     /** The picker replaces the status line and the mic; opening it pauses dictation. */
     private fun showEmoji(show: Boolean) {
-        if (show) {
-            if (afterFinish != null) return
-            if (state != State.IDLE) pauseNow()
-            fillRecentEmoji()
-        }
+        if (show) fillRecentEmoji()
         emojiPanel.visibility = if (show) View.VISIBLE else View.GONE
         status.visibility = if (show) View.GONE else View.VISIBLE
         micButton.visibility = if (show) View.GONE else View.VISIBLE
@@ -759,6 +804,8 @@ class VoiceInputService : InputMethodService() {
     }
 
     private fun typeEmoji(emoji: String) {
+        if (afterFinish != null) return
+        beforeEdit()
         currentInputConnection?.commitText(emoji, 1)
         val recent = (listOf(emoji) + recentEmoji().filter { it != emoji }).take(EMOJI_PER_ROW)
         getSharedPreferences("emoji", MODE_PRIVATE).edit().putString("recent", recent.joinToString(" ")).apply()
@@ -813,6 +860,8 @@ class VoiceInputService : InputMethodService() {
         /** How far around the cursor to look for moved composing text when the app gives no extracted text. */
         const val SEARCH_WINDOW = 2000
         val WHITESPACE = Regex("\\s+")
+        /** How long the submit key waits for the final of the utterance on screen while listening. */
+        const val SUBMIT_WAIT_MS = 3_000L
         /** Characters of the clipboard shown on the paste chip. */
         const val CLIP_PREVIEW = 24
         const val EMOJI_PER_ROW = 8

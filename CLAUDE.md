@@ -17,8 +17,9 @@ Personal use at first; since 2026-10-19 the Android app is also being published 
 - **Android builds only when the user asks** (2026-10-11): don't run `android/build.sh` for every change.
   Still port shared-engine changes to `android/core` and check them with the core tests / replay tool. When
   asked for a build, set the Android `versionName` to the current Mac version, build, and reveal the APK.
-- **Bump the version, not just the build number**, for every change you ship: minor (0.x → 0.x+1) for
-  fixes and features, major for big changes. Mac: `CFBundleShortVersionString` in `Resources/Info.plist`;
+- **Bump the version, not just the build number**, for every change you ship. Since 2026-10-27 the version is
+  **1.0.1** on both apps (the user's choice) and counts up from there: the last number (1.0.1 → 1.0.2) for each
+  fix or feature, the middle one for big changes; Mac and Android share the number. Mac: `CFBundleShortVersionString` in `Resources/Info.plist`;
   Android: `versionName` in `android/app/build.gradle*`. The build scripts only bump the build number.
 - **Commit every change** to the local git repo (branch `main`, created 2026-10-08) after it builds and its
   tests/replays pass: one commit per change, message says what and why, version in the subject when bumped.
@@ -222,6 +223,15 @@ still right before the cursor, or anywhere in the field (the user may have tappe
 first N words (N = words in the last interim) are skipped in its later results (`sentWords`, log
 `composing text removed by the app`). On `onStartInputView(restarting)` the composing region is re-attached if our text
 is still before the cursor, else treated the same way. Unconfirmed on the phone.
+**Keys don't stop dictation** (1.0.1, the user's request: only the first opening, which is paused, and their own
+pause stop it). ◀ ▶ ⌫, paste and typing an emoji (opening the picker no longer pauses) first `detachComposing`: the
+utterance in progress is typed in as shown and its shown words are skipped in that utterance's later results (`sentWords`,
+the mechanism also used when an app's Send button takes the composing text), so a deleted word doesn't come back and
+nothing is typed twice; the rest of the utterance is composed where the cursor is then. While finishing after the
+user's pause these keys still don't wait for the last result (`pauseNow`). The submit key while listening waits up
+to 3 s for the final of the utterance on screen, types it, submits and keeps listening (`submitWhenFinal`).
+Emulator test (recording via `test-input.wav`): ⌫ at 17 s, emoji at 26 s, ◀ at 31 s — listening went on, the deleted
+word stayed deleted, no duplicates.
 **Panel** (0.27.0, the user's layout feedback on 0.26.0: one row too sparse, one too cramped, colourful icons broke the
 theme): Gboard-style **toolbar** on top — a flat emoji icon and a **paste chip** showing the clipboard's first 24 characters
 (whitespace collapsed; `••••••` for clips marked `EXTRA_IS_SENSITIVE`; just the icon when the clipboard has no text;
@@ -248,7 +258,7 @@ If there is no previous keyboard the system picker opens. OTP fields declared as
 cursor, or the whole word the cursor is in, plus the spaces before it, keeping one space when words remain on
 both sides; a line break before the cursor alone; a selection as a whole. **◀ ▶ move by words** (Persian is RTL:
 ▶ = back to the start of the previous word, ◀ = forward to the end of the next). While listening, these keys
-first pause (type the last interim as is, cancel the recognizer). Removed in 0.17.0: ⏎ (finish + Enter) and
+first pause (type the last interim as is, cancel the recognizer) — until 1.0.1, see below. Removed in 0.17.0: ⏎ (finish + Enter) and
 ✓ (same as ⌨). Hiding the keyboard keeps the composing text and stops. Mic: `AudioRecord` VOICE_RECOGNITION.
 Half-open panel bug (keys cut off at the bottom, seen on the phone): the bottom padding for the navigation bar
 was set only when insets arrived, after the first layout, changing the keyboard's height while it slid in. Now
