@@ -1,5 +1,6 @@
 package local.voice2text.persiandictation
 
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
@@ -7,6 +8,7 @@ import android.graphics.drawable.GradientDrawable
 import android.inputmethodservice.InputMethodService
 import android.os.Handler
 import android.os.Looper
+import android.text.InputType
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
@@ -18,6 +20,7 @@ import android.view.inputmethod.ExtractedTextRequest
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import local.voice2text.core.ContinuousRecognizer
 import local.voice2text.core.Corrections
@@ -28,6 +31,8 @@ import local.voice2text.core.SpokenPunctuation
  * A voice-only keyboard used next to Gboard. It opens paused; 🎤 starts listening. The hypothesis in
  * progress goes into the text field as composing (underlined) text and each finalized utterance is
  * committed. ⌫ deletes and ◀ ▶ move by whole words; ⌨ switches back to the previous keyboard (Gboard).
+ * Also: 😊 emoji picker, 📋 paste, space, and a submit key that does the field's action (send, search…)
+ * like Gboard's. Number, phone, date and password fields go straight back to the previous keyboard.
  */
 class VoiceInputService : InputMethodService() {
     private enum class State { IDLE, LISTENING, FINISHING }
@@ -41,12 +46,25 @@ class VoiceInputService : InputMethodService() {
     /** Runs once the last result is committed after stopping (e.g. press Enter, return to Gboard). */
     private var afterFinish: (() -> Unit)? = null
     private var finishTimeout: Runnable? = null
-    /** Whether a space goes before the utterance being composed; decided when composing starts. */
-    private var composingSpace: Boolean? = null
+    /** The text around the cursor where the utterance is being composed; set when composing starts. */
+    private var composingGap: Gap? = null
+    /** Exactly what was last passed to setComposingText, to notice when the app removed it. */
+    private var composingShown: String? = null
+    /**
+     * The app removed our composing text (e.g. its Send button sent and cleared the field) while
+     * Google was still working on that utterance: this many leading words of the utterance's later
+     * results are skipped, so they aren't typed into the field again.
+     */
+    private var sentWords = 0
 
     private lateinit var status: TextView
     private lateinit var micButton: TextView
     private lateinit var micCircle: GradientDrawable
+    private lateinit var submitKey: TextView
+    private lateinit var emojiKey: TextView
+    private lateinit var emojiPanel: View
+    private lateinit var emojiRecentRow: LinearLayout
+    private var keyHeight = 0
     private var dark = false
     /** The field's selection, from onUpdateSelection: fallback when the app gives no extracted text. */
     private var selStart = -1
@@ -87,23 +105,45 @@ class VoiceInputService : InputMethodService() {
             background = micCircle
             setOnClickListener { tap(it); toggleListening() }
         }
-        fun key(label: String, action: () -> Unit) = TextView(this).apply {
+        fun key(label: String, weight: Float = 1f, action: () -> Unit) = TextView(this).apply {
             text = label
             textSize = 22f
             gravity = Gravity.CENTER
             setTextColor(fg)
+            maxLines = 1
             background = GradientDrawable().apply { setColor(keyBg); cornerRadius = px(8).toFloat() }
             setOnClickListener { tap(it); action() }
-            layoutParams = LinearLayout.LayoutParams(0, px(48), 1f).apply { setMargins(px(4), 0, px(4), 0) }
+            layoutParams = LinearLayout.LayoutParams(0, px(48), weight).apply { setMargins(px(4), 0, px(4), 0) }
         }
-        val keys = LinearLayout(this).apply {
+        fun row(top: Int) = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(px(4), px(8), px(4), px(4))
+            setPadding(px(4), px(top), px(4), px(4))
+        }
+        emojiKey = key("😊") { toggleEmoji() }
+        val keys = row(8).apply {
             addView(key("⌨") { switchBack(waitForLastResult = false) })
-            addView(key("⌫") {}.apply { repeatWhileHeld(this) { backspace() } })
+            addView(emojiKey)
+            addView(key("📋") { pasteClipboard() })
             // Persian runs right to left: ▶ goes back to the previous word, ◀ forward to the next.
             addView(key("◀") {}.apply { repeatWhileHeld(this) { moveWord(back = false) } })
             addView(key("▶") {}.apply { repeatWhileHeld(this) { moveWord(back = true) } })
+            addView(key("⌫") {}.apply { repeatWhileHeld(this) { backspace() } })
+        }
+        submitKey = key("↵", 2f) { submitKeyPressed() }
+        val keys2 = row(0).apply {
+            addView(key("␣", 4f) { typeSpace() }.apply { setTextColor(muted) })
+            addView(submitKey)
+        }
+        keyHeight = px(44)
+        emojiRecentRow = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        emojiPanel = ScrollView(this).apply {
+            visibility = View.GONE
+            addView(LinearLayout(this@VoiceInputService).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(px(4), px(4), px(4), 0)
+                addView(emojiRecentRow)
+                EMOJI.chunked(EMOJI_PER_ROW).forEach { addView(emojiRow(it)) }
+            })
         }
         val version = TextView(this).apply {
             text = "Persian Dictation ${versionDisplay(this@VoiceInputService)}"
@@ -116,7 +156,10 @@ class VoiceInputService : InputMethodService() {
             setBackgroundColor(if (dark) Color.rgb(32, 33, 36) else Color.rgb(232, 234, 237))
             addView(status, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, px(64)))
             addView(micButton, LinearLayout.LayoutParams(px(88), px(88)).apply { gravity = Gravity.CENTER_HORIZONTAL })
+            // The emoji picker takes the place of the status line and the mic (same height).
+            addView(emojiPanel, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, px(152)))
             addView(keys, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            addView(keys2, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
             addView(version)
             // Keep the keys above the navigation bar / gesture handle. The padding is set before the
             // first layout and changed only when the inset really changes: when the keyboard's height
@@ -133,7 +176,7 @@ class VoiceInputService : InputMethodService() {
                 }
                 insets
             }
-        }.also { render() }
+        }.also { render(); updateSubmitKey() }
     }
 
     /** The system's navigation bar height, the usual bottom inset, so the padding rarely changes later. */
@@ -148,7 +191,31 @@ class VoiceInputService : InputMethodService() {
         super.onStartInputView(info, restarting)
         selStart = info?.initialSelStart ?: -1
         selEnd = info?.initialSelEnd ?: -1
+        if (restarting && composingShown != null) composingAfterRestart(info)
+        if (info != null && !voiceSuitsField(info)) {
+            // Digits, PINs and passwords: voice is the wrong tool (and a password must not go to Google).
+            // Back to the previous keyboard (Gboard) at once; posted so the input view finishes starting.
+            AppLog.write("field type 0x${Integer.toHexString(info.inputType)}: switching to the previous keyboard")
+            main.post { switchBack(waitForLastResult = false) }
+            return
+        }
+        if (::emojiPanel.isInitialized) showEmoji(false)
+        updateSubmitKey()
         render()
+    }
+
+    /** Number, phone, date/time and password fields are left to the previous keyboard. */
+    private fun voiceSuitsField(info: EditorInfo): Boolean {
+        val type = info.inputType
+        return when (type and InputType.TYPE_MASK_CLASS) {
+            InputType.TYPE_CLASS_NUMBER, InputType.TYPE_CLASS_PHONE, InputType.TYPE_CLASS_DATETIME -> false
+            InputType.TYPE_CLASS_TEXT -> when (type and InputType.TYPE_MASK_VARIATION) {
+                InputType.TYPE_TEXT_VARIATION_PASSWORD, InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD,
+                InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD -> false
+                else -> true
+            }
+            else -> true
+        }
     }
 
     override fun onUpdateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int,
@@ -215,7 +282,9 @@ class VoiceInputService : InputMethodService() {
         AppLog.write("dictation start field=${currentInputEditorInfo?.packageName}")
         recognizer = r
         mic = capture
-        composingSpace = null
+        endComposing()
+        sentWords = 0
+        lastInterim = ""
         r.start()
         state = State.LISTENING
         render()
@@ -250,7 +319,8 @@ class VoiceInputService : InputMethodService() {
         val wasListening = state == State.LISTENING
         state = State.IDLE
         currentInputConnection?.finishComposingText()
-        composingSpace = null
+        endComposing()
+        sentWords = 0
         render()
         if (error != null) {
             showStatus(if (wasListening) "Connection problem: ${error.message}. Check internet/VPN, then tap the mic." else "Stopped: ${error.message}")
@@ -263,10 +333,15 @@ class VoiceInputService : InputMethodService() {
     /** Pause immediately: keep the text shown so far (no waiting for Google's final result). */
     private fun pauseNow() {
         val pending = lastInterim
-        val space = composingSpace // decided before the composing text was shown; keep it
+        val gap = composingGap // measured before the composing text was shown; keep it
+        val shown = composingShown
+        val skip = sentWords
         stopEverything()
-        composingSpace = space
-        if (pending.isNotBlank()) commitFinal(pending) else { currentInputConnection?.finishComposingText(); composingSpace = null }
+        composingGap = gap
+        composingShown = shown
+        sentWords = skip
+        if (pending.isNotBlank()) commitFinal(pending) else { currentInputConnection?.finishComposingText(); endComposing() }
+        sentWords = 0
         lastInterim = ""
         render()
         AppLog.write("paused by a key" + if (pending.isNotBlank() && Settings.developmentMode(this)) " (kept: $pending)" else "")
@@ -294,44 +369,143 @@ class VoiceInputService : InputMethodService() {
         mic = null
         recognizer?.cancel()
         recognizer = null
-        composingSpace = null
+        endComposing()
+        sentWords = 0
         state = State.IDLE
     }
 
     // Text
 
+    /** Spoken punctuation and corrections; the words the app already took (see [sentWords]) left out. */
+    private fun format(raw: String): String {
+        val words = if (sentWords > 0) raw.trim().split(WHITESPACE).filter { it.isNotEmpty() }.drop(sentWords).joinToString(" ") else raw
+        return SpokenPunctuation.apply(Corrections.apply(words, Settings.LANGUAGE), Settings.LANGUAGE)
+    }
+
     private fun showInterim(raw: String) {
         if (state == State.IDLE) return
+        if (composingShown != null && !composingStillThere()) composingRemovedByApp()
         lastInterim = raw
-        val text = SpokenPunctuation.apply(Corrections.apply(raw, Settings.LANGUAGE), Settings.LANGUAGE).replace('\n', ' ')
-        showStatus(text.ifEmpty { "در حال گوش دادن…" })
+        val text = format(raw)
+        showStatus(text.replace("\n", " ↵ ").replace(SpokenPunctuation.ENTER.toString(), " ⏎ ").trim().ifEmpty { "در حال گوش دادن…" })
         val ic = currentInputConnection ?: return
-        if (text.isEmpty()) {
-            if (composingSpace != null) ic.setComposingText("", 1)
+        // Line breaks and Enter happen when the final is committed; meanwhile they show as spaces.
+        val preview = text.replace(Regex("[\\n\r]+"), " ").trim()
+        if (preview.isEmpty()) {
+            if (composingShown != null) { ic.setComposingText("", 1); composingShown = "" }
             return
         }
-        val space = composingSpace ?: needsSpaceBefore().also { composingSpace = it }
-        ic.setComposingText(if (space && !SpokenPunctuation.attachesToPrevious(text)) " $text" else text, 1)
+        val gap = composingGap ?: gapAtCursor(preview).also { composingGap = it }
+        val shown = gap.fit(preview)
+        ic.setComposingText(shown, 1)
+        composingShown = shown
     }
 
     private fun commitFinal(raw: String) {
+        if (composingShown != null && !composingStillThere()) composingRemovedByApp()
         lastInterim = "" // this utterance is done; a pause must not type it again
-        val text = SpokenPunctuation.apply(Corrections.apply(raw, Settings.LANGUAGE), Settings.LANGUAGE)
+        val text = format(raw)
+        sentWords = 0
         val ic = currentInputConnection ?: return
-        if (text.isEmpty()) {
-            ic.commitText("", 1) // removes any composing text
-        } else {
-            val space = composingSpace ?: needsSpaceBefore()
-            ic.commitText(if (space && !SpokenPunctuation.attachesToPrevious(text)) " $text" else text, 1)
+        // "اینتر": commit what came before it, do the field's action (send, search…), then go on.
+        text.split(SpokenPunctuation.ENTER).forEachIndexed { i, part ->
+            if (i > 0) {
+                AppLog.write("spoken Enter")
+                submit()
+            }
+            commitText(ic, part)
         }
-        composingSpace = null
         if (state != State.IDLE) showStatus(if (state == State.LISTENING) "در حال گوش دادن…" else "…")
     }
 
-    /** Whether the committed text right before the cursor needs a separating space. */
-    private fun needsSpaceBefore(): Boolean {
-        val before = currentInputConnection?.getTextBeforeCursor(1, 0)
-        return !before.isNullOrEmpty() && !before.last().isWhitespace() && before.last() != '('
+    /** Commits [text] in place of the composing text, or at the cursor, spaced to fit its neighbours. */
+    private fun commitText(ic: InputConnection, text: String) {
+        if (text.isEmpty()) {
+            if (composingShown != null) ic.commitText("", 1) // removes the composing text
+        } else {
+            ic.commitText((composingGap ?: gapAtCursor(text)).fit(text), 1)
+        }
+        endComposing()
+    }
+
+    private fun endComposing() {
+        composingGap = null
+        composingShown = null
+    }
+
+    /**
+     * What is around the cursor, so inserted text gets exactly one space between it and the words on
+     * either side, also in the middle of the text. Before, a space was only ever added in front, so
+     * after moving the cursor or deleting, words ended up two or three spaces apart (or stuck together).
+     * Text that attaches to the previous word (". ، ؟") also removes the spaces before the cursor.
+     */
+    private fun gapAtCursor(text: String): Gap {
+        val ic = currentInputConnection ?: return Gap(false, false)
+        var before = ic.getTextBeforeCursor(GAP_WINDOW, 0)?.toString().orEmpty()
+        if (SpokenPunctuation.attachesToPrevious(text)) {
+            val spaces = before.length - before.trimEnd { isSpace(it) }.length
+            if (spaces in 1 until before.length) {
+                ic.deleteSurroundingText(spaces, 0)
+                before = before.dropLast(spaces)
+            }
+        }
+        val prev = before.lastOrNull()
+        val next = ic.getTextAfterCursor(1, 0)?.firstOrNull()
+        return Gap(
+            wordBefore = prev != null && !prev.isWhitespace() && prev != '(',
+            wordAfter = next != null && !next.isWhitespace() && next !in SpokenPunctuation.SYMBOLS,
+        )
+    }
+
+    /** Whether there is a word right before / after the insertion point (not a space, not the field's edge). */
+    private class Gap(val wordBefore: Boolean, val wordAfter: Boolean) {
+        fun fit(text: String): String {
+            val lead = wordBefore && !SpokenPunctuation.attachesToPrevious(text)
+            val trail = wordAfter && !SpokenPunctuation.attachesToNext(text) && !text.last().isWhitespace()
+            return (if (lead) " " else "") + text + (if (trail) " " else "")
+        }
+    }
+
+    /**
+     * Whether our composing text is still in the field. The app may take it away: its own Send button
+     * sends and clears the field while Google is still on that utterance. Before, the next result was
+     * composed again and part of the sent message reappeared in the empty field.
+     */
+    private fun composingStillThere(): Boolean {
+        val shown = composingShown ?: return true
+        if (shown.isEmpty()) return true
+        val ic = currentInputConnection ?: return true
+        val before = ic.getTextBeforeCursor(shown.length, 0) ?: return true // the app doesn't say
+        if (before.toString() == shown) return true
+        // The user may have tapped elsewhere in the field: the composing text is still somewhere.
+        val all = ic.getExtractedText(ExtractedTextRequest(), 0)?.text
+            ?: ((ic.getTextBeforeCursor(SEARCH_WINDOW, 0) ?: "").toString() + (ic.getTextAfterCursor(SEARCH_WINDOW, 0) ?: ""))
+        return all.contains(shown)
+    }
+
+    /** The app took the composing text: skip what was shown of this utterance and start fresh. */
+    private fun composingRemovedByApp() {
+        val shownWords = lastInterim.trim().split(WHITESPACE).count { it.isNotEmpty() }
+        AppLog.write("composing text removed by the app; skipping the utterance's first $shownWords words")
+        sentWords = maxOf(sentWords, shownWords)
+        endComposing()
+    }
+
+    /**
+     * The app restarted the input (some do on send). The composing span is gone either way: if our
+     * text is still right before the cursor, compose over it again, else treat it as removed.
+     */
+    private fun composingAfterRestart(info: EditorInfo?) {
+        val shown = composingShown ?: return
+        val ic = currentInputConnection ?: return
+        val cursor = info?.initialSelEnd ?: -1
+        if (shown.isNotEmpty() && cursor >= shown.length && ic.getTextBeforeCursor(shown.length, 0)?.toString() == shown) {
+            ic.setComposingRegion(cursor - shown.length, cursor)
+        } else if (shown.isNotEmpty() && state != State.IDLE) {
+            composingRemovedByApp()
+        } else {
+            endComposing()
+        }
     }
 
     /**
@@ -410,6 +584,121 @@ class VoiceInputService : InputMethodService() {
         ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL))
     }
 
+    // Keys
+
+    /** Like Gboard's: the field's action (send, search, go, next, done…), else Enter. */
+    private class SubmitAction(val label: String, val actionId: Int?, val newline: Boolean)
+
+    private fun submitAction(info: EditorInfo?): SubmitAction {
+        if (info == null) return SubmitAction("↵", null, false)
+        val multiLine = (info.inputType and InputType.TYPE_MASK_CLASS) == InputType.TYPE_CLASS_TEXT &&
+            (info.inputType and InputType.TYPE_TEXT_FLAG_MULTI_LINE) != 0
+        if ((info.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION) != 0) return SubmitAction("↵", null, multiLine)
+        if (info.actionLabel != null && info.actionId != 0) return SubmitAction(info.actionLabel.toString(), info.actionId, false)
+        val action = info.imeOptions and EditorInfo.IME_MASK_ACTION
+        val label = when (action) {
+            EditorInfo.IME_ACTION_SEARCH -> "🔍"
+            EditorInfo.IME_ACTION_SEND -> "➤"
+            EditorInfo.IME_ACTION_GO -> "➜"
+            EditorInfo.IME_ACTION_NEXT -> "⇥"
+            EditorInfo.IME_ACTION_PREVIOUS -> "⇤"
+            EditorInfo.IME_ACTION_DONE -> "✓"
+            else -> return SubmitAction("↵", null, multiLine)
+        }
+        return SubmitAction(label, action, false)
+    }
+
+    private fun updateSubmitKey() {
+        if (!::submitKey.isInitialized) return
+        val action = submitAction(currentInputEditorInfo)
+        submitKey.text = action.label
+        submitKey.textSize = if (action.label.length > 2) 15f else 22f
+    }
+
+    /** While listening it waits for the last result first (up to a few seconds), like Enter on the Mac. */
+    private fun submitKeyPressed() {
+        if (afterFinish != null) return
+        when (state) {
+            State.LISTENING -> stopListening { submit() }
+            State.FINISHING -> afterFinish = { submit() }
+            State.IDLE -> submit()
+        }
+    }
+
+    private fun submit() {
+        val ic = currentInputConnection ?: return
+        val action = submitAction(currentInputEditorInfo)
+        when {
+            action.actionId != null -> ic.performEditorAction(action.actionId)
+            action.newline -> ic.commitText("\n", 1)
+            else -> {
+                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
+                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
+            }
+        }
+    }
+
+    private fun typeSpace() {
+        if (afterFinish != null) return
+        if (state != State.IDLE) pauseNow()
+        currentInputConnection?.commitText(" ", 1)
+    }
+
+    /** 📋 types the clipboard's text as is; if we may not read it, the app pastes it itself. */
+    private fun pasteClipboard() {
+        if (afterFinish != null) return
+        if (state != State.IDLE) pauseNow()
+        val ic = currentInputConnection ?: return
+        val clip = (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).primaryClip
+        val text = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
+        if (!text.isNullOrEmpty()) ic.commitText(text, 1)
+        else if (!ic.performContextMenuAction(android.R.id.paste)) showStatus("Clipboard is empty")
+    }
+
+    // Emoji
+
+    private fun toggleEmoji() = showEmoji(emojiPanel.visibility != View.VISIBLE)
+
+    /** The picker replaces the status line and the mic; opening it pauses dictation. */
+    private fun showEmoji(show: Boolean) {
+        if (show) {
+            if (afterFinish != null) return
+            if (state != State.IDLE) pauseNow()
+            fillRecentEmoji()
+        }
+        emojiPanel.visibility = if (show) View.VISIBLE else View.GONE
+        status.visibility = if (show) View.GONE else View.VISIBLE
+        micButton.visibility = if (show) View.GONE else View.VISIBLE
+        emojiKey.text = if (show) "🎤" else "😊"
+    }
+
+    private fun emojiRow(emoji: List<String>) = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        for (e in emoji) addView(TextView(this@VoiceInputService).apply {
+            text = e
+            textSize = 24f
+            gravity = Gravity.CENTER
+            setOnClickListener { tap(it); typeEmoji(e) }
+        }, LinearLayout.LayoutParams(0, keyHeight, 1f))
+        // Keep a short last row in the same columns.
+        repeat(EMOJI_PER_ROW - emoji.size) { addView(View(this@VoiceInputService), LinearLayout.LayoutParams(0, keyHeight, 1f)) }
+    }
+
+    private fun typeEmoji(emoji: String) {
+        currentInputConnection?.commitText(emoji, 1)
+        val recent = (listOf(emoji) + recentEmoji().filter { it != emoji }).take(EMOJI_PER_ROW)
+        getSharedPreferences("emoji", MODE_PRIVATE).edit().putString("recent", recent.joinToString(" ")).apply()
+    }
+
+    private fun recentEmoji() =
+        getSharedPreferences("emoji", MODE_PRIVATE).getString("recent", "")!!.split(' ').filter { it.isNotEmpty() }
+
+    private fun fillRecentEmoji() {
+        emojiRecentRow.removeAllViews()
+        val recent = recentEmoji()
+        if (recent.isNotEmpty()) emojiRecentRow.addView(emojiRow(recent))
+    }
+
     // Leaving
 
     private fun switchBack(waitForLastResult: Boolean) {
@@ -445,5 +734,23 @@ class VoiceInputService : InputMethodService() {
     private companion object {
         /** How much text around the cursor ⌫ and ◀ ▶ look at: longer than any word. */
         const val WORD_WINDOW = 200
+        /** How far back [gapAtCursor] looks for spaces before the cursor. */
+        const val GAP_WINDOW = 20
+        /** How far around the cursor to look for moved composing text when the app gives no extracted text. */
+        const val SEARCH_WINDOW = 2000
+        val WHITESPACE = Regex("\\s+")
+        const val EMOJI_PER_ROW = 8
+        val EMOJI = listOf(
+            "😂", "❤️", "🌹", "🙏", "👍", "😍", "😊", "🤣",
+            "😁", "😅", "😉", "😎", "😘", "🥰", "🤗", "🙂",
+            "🤔", "😐", "🙄", "😏", "😬", "😔", "😢", "😭",
+            "😡", "😱", "😴", "😷", "🤦", "🤷", "😇", "🥳",
+            "👌", "👏", "💪", "✌️", "🙌", "👋", "🤝", "🤞",
+            "👀", "👇", "👆", "👉", "👈", "💯", "🔥", "⭐",
+            "✅", "❌", "❗", "❓", "⚠️", "💡", "📌", "🎉",
+            "💙", "💚", "💛", "🧡", "💜", "🖤", "🤍", "💔",
+            "☀️", "🌙", "🌸", "🍀", "☕", "🍰", "🎂", "🎁",
+            "🏠", "🚗", "✈️", "📞", "💻", "📱", "⏰", "📷",
+        )
     }
 }

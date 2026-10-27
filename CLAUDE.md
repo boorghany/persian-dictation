@@ -23,8 +23,9 @@ Personal use at first; since 2026-10-19 the Android app is also being published 
 - **Commit every change** to the local git repo (branch `main`, created 2026-10-08) after it builds and its
   tests/replays pass: one commit per change, message says what and why, version in the subject when bumped.
   Build output, APKs (`android/dist/`), `local.properties` and caches are git-ignored.
-- **The user plans to publish this on GitHub later.** Keep secrets and personal data out of commits. Before
-  the first push, review with the user: `testdata/recordings/*.wav` are the user's own voice and dictated
+- **GitHub:** private repo `boorghany/persian-dictation` (`origin`, over SSH; `gh` is signed in as boorghany),
+  `main` first pushed 2026-10-27 at the user's request. Push `main` after merging. Keep secrets and personal data out
+  of commits. The user may make it public later; before that, review with the user: `testdata/recordings/*.wav` are the user's own voice and dictated
   text; this file mentions their phone, location/VPN and headset; the Chromium key is public but unofficial
   use of Google's endpoint should be explained in a README; add a LICENSE.
 - **Development mode** (verbose log + a WAV recording of every Google session) is **off by default** since
@@ -189,9 +190,35 @@ sessions, false "freezes") and every session paid a VPN TLS handshake (sometimes
 starts only after OkHttp's `requestHeadersEnd` for the down request; `onConnected` feeds the watchdog.
 
 IME behaviour (0.17.0): opens **paused** — the user taps 🎤 to start (before: listened as soon as shown).
-Interim text is shown in the panel and as underlined composing text in the field; finals are committed with a
-space if the text before the cursor needs one. Keys: ⌨ back to Gboard immediately (`switchToPreviousInputMethod`,
-falls back to the picker), ⌫, ◀, ▶ (all hold to repeat, 150 ms). **⌫ deletes a whole word**: the word before the
+Interim text is shown in the panel and as underlined composing text in the field; finals are committed.
+**Spacing** (0.25.0, `gapAtCursor` / `Gap`): before composing/committing, the characters around the cursor are read:
+a space goes before the text only if a word is right before the cursor (not whitespace, `(` or the field's start), and
+one goes **after** it if a word follows (not whitespace or `. ، ؟ : ) !`); text that attaches to the previous word
+(punctuation, line break, Enter) also removes spaces right before the cursor. Before, only the leading space was
+decided, so inserting in the middle of text (after moving the cursor or deleting) left words stuck together or two or
+three spaces apart (the user's report).
+**App removed the composing text** (0.25.0): the user said something still interim, then tapped the app's own Send,
+which sent and cleared the field; the next interim/final composed the whole utterance again, so part of the sent
+message reappeared. Now, before each interim and final, the keyboard checks its composing text (`composingShown`) is
+still right before the cursor, or anywhere in the field (the user may have tapped elsewhere); if not, the utterance's
+first N words (N = words in the last interim) are skipped in its later results (`sentWords`, log
+`composing text removed by the app`). On `onStartInputView(restarting)` the composing region is re-attached if our text
+is still before the cursor, else treated the same way. Unconfirmed on the phone.
+**Keys** (0.25.0): row 1 ⌨ 😊 📋 ◀ ▶ ⌫, row 2 space (␣) and the **submit key**, which follows the field's `imeOptions`
+like Gboard's: 🔍 search, ➤ send, ➜ go, ⇥ next, ⇤ previous, ✓ done, a custom `actionLabel`, and ↵ (newline in
+multi-line fields — chat apps mark their box `IME_FLAG_NO_ENTER_ACTION`, so there it is a newline, like Gboard — else
+a KEYCODE_ENTER key event). It runs `performEditorAction`; while listening it first waits for the last result (like the
+Mac's Enter). Spoken **اینتر** does the same action between the text before and after it, and keeps listening.
+📋 types the clipboard's text (an IME in use may read it), or asks the app to paste (`performContextMenuAction`) if
+it can't. 😊 swaps the status line and mic for a scrollable emoji grid (80 common emoji + a row of the 8 most recent,
+kept in prefs `emoji`); 🎤 there goes back. Gboard's emoji panel can't be opened from another keyboard and there is
+no AndroidX (no EmojiCompat), so emoji rely on the system font. Space, 📋, emoji and opening the picker pause first.
+**Number, phone, date/time and password fields** (0.25.0, `voiceSuitsField`): the keyboard switches straight back to
+the previous one (Gboard) in `onStartInputView` — chosen over a built-in numeric keypad because the user runs this next
+to Gboard anyway, Gboard's number pad is better than anything we'd draw, and a password must never be sent to Google.
+If there is no previous keyboard the system picker opens. OTP fields declared as plain text aren't detected.
+⌨ goes back to Gboard immediately (`switchToPreviousInputMethod`, falls back to the picker); ⌫, ◀, ▶ hold to repeat
+(150 ms). **⌫ deletes a whole word**: the word before the
 cursor, or the whole word the cursor is in, plus the spaces before it, keeping one space when words remain on
 both sides; a line break before the cursor alone; a selection as a whole. **◀ ▶ move by words** (Persian is RTL:
 ▶ = back to the start of the previous word, ◀ = forward to the end of the next). While listening, these keys
