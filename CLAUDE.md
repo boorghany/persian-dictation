@@ -22,6 +22,8 @@ Personal use at first; since 2026-10-19 the Android app is also being published 
   Android: `versionName` in `android/app/build.gradle*`. The build scripts only bump the build number.
 - **Commit every change** to the local git repo (branch `main`, created 2026-10-08) after it builds and its
   tests/replays pass: one commit per change, message says what and why, version in the subject when bumped.
+- **Push after every commit** to GitHub (`origin` = private repo `boorghany/persian-dictation`; the user asked
+  on 2026-10-27).
   Build output, APKs (`android/dist/`), `local.properties` and caches are git-ignored.
 - **The user plans to publish this on GitHub later.** Keep secrets and personal data out of commits. Before
   the first push, review with the user: `testdata/recordings/*.wav` are the user's own voice and dictated
@@ -77,7 +79,7 @@ All found from real recordings; the Android `core` module is a line-by-line port
    then sends an **empty final**, losing the sentence. Detected as: ≥ 3 s without new interim text while
    ≥ 0.8 s of speech was heard, or an empty final after non-empty interim text. Recovery: open a fresh
    session and **replay all audio of the current utterance** (up to 55 s) in one burst. Max 2 recoveries
-   per utterance; after that, use the last interim text if it has ≥ 2 words (else drop), or start clean.
+   per utterance; after that, use the shown text (see 7) if it has ≥ 2 words (else drop), or start clean.
    The clock starts when the session is actually connected (Android: OkHttp `requestHeadersEnd`; Mac: first
    `didSendBodyData` of the up request, or any interim); not connected within 4 s → retry with the audio.
    Before the Mac had this (≤ 0.2.0), a 3–7 s VPN handshake was mistaken for a freeze (2026-10-07 afternoon:
@@ -104,6 +106,22 @@ All found from real recordings; the Android `core` module is a line-by-line port
    or hide a line break at the very end of pasted text, so a "پاراگراف بعد" pasted on its own (`\n\n`)
    showed as one line break and the user had to say "خط بعد" again (log 2026-10-22 00:33, 00:37).
    Known gaps: literal "خط بد" becomes a newline; "۲ نقطه" written with a digit isn't converted.
+7. **Keep what the user saw** (`ShownText`, 0.26.0, both apps). Google sometimes drops the last words of the
+   interim (noise, an unsure word, a long sentence) and then leaves them out of the final too, although it had
+   shown them — 2026-10-27 06:03: "…پرشین دیکتیشن علامت سوال الان یه چیز بی‌ربط" → final "…پرشین دیکتیشن",
+   and the user said it again. Replaying the audio does **not** help: real-time and burst replays into fresh
+   sessions dropped the same 6 words (4 of 4). On Android it looked worse because the interim is the field's
+   composing text, and a freeze recovery's new session starts its text from nothing (Android log 2026-10-23..26:
+   22 freezes in 80 dictations; the Mac has the same rate, 137 in 553, but only the overlay shrank).
+   - Interim: text 2+ words shorter than what was shown isn't displayed; the shown text stays until Google
+     catches up (log `keeping the shown text`). Smaller revisions (شدن → شدند) go through.
+   - Final: if everything but its last word matches the shown text and 2+ shown words are missing after it,
+     they're put back (log `final left out N shown words; keeping them`). One missing word may be noise: not restored.
+   - Echo: Google sometimes sends those words in the next utterance after all (Mac log: 15 of 34 shorter finals
+     were splits), so while the next session's text is, or starts with, the restored words they're removed from it
+     (once; forgotten as soon as the text is something else). The same after a freeze that replays didn't fix:
+     the shown text is delivered (`using the shown text for the frozen utterance`).
+   - Kotlin unit tests: `ShownTextTest.kt`. Regression recordings: `2026-10-27T06-03-36Z-dropped-tail*.wav`.
 
 ## macOS app (repo root)
 
@@ -242,6 +260,8 @@ Regression set in `testdata/recordings/` — expected finals (both engines must 
 | `2026-10-07T05-52-37Z-s1.wav` | گت یور پسکیز · رو نشون نده علامت سوال من علاقه دارم رمزهام با گوگل · سینک بشه ولی پس کیها نه · نقطه |
 | `2026-10-08T14-58-31Z-repeated-final.wav` (stitched from 8 session recordings) | گیج شدم · چون اون بالا نوشتی فرایند به این صورت است · من راستش اینجا (once; ≤ 0.9.0 typed it 4 times) |
 | `2026-10-07T05-55-36Z-s1-first12s.wav` | with each of `silence:1:2.0`, `empty-final:1`, `silence:2:0.5`: غیر از متن پیامک · می‌خوام · یه شماره یا |
+| `2026-10-27T06-03-36Z-dropped-tail.wav` | اسم پوشه پروژه رو هم روی این سیستم می‌تونی تغییر بدی به همین پرشین دیکتیشن علامت سوال الان یه چیز بی‌ربط (≤ 0.25.0: without the last 6 words) |
+| `2026-10-27T06-03-36Z-dropped-tail-repeated.wav` (+ the next session, where the user said the tail again) | the same, then nothing (the repeat is removed as an echo) |
 
 Recordings 05-55-36, 05-54-38 and 05-52-37 reproduce the clipped-start bug and 06-00-38 the freeze when
 replayed in a single continuous session; the old buggy outputs were ی‌خوام, مونه, و, and a lost sentence.

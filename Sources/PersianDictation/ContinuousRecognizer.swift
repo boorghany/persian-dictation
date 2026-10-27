@@ -13,9 +13,13 @@ import Foundation
 /// (speech but no new results for a few seconds, or an empty final after real interim text) and
 /// replays all of the utterance's audio into a fresh session, which recognizes it correctly.
 ///
+/// What the user saw is kept (`ShownText`): text doesn't shrink when Google drops words, and words it
+/// showed but left out of its final are put back.
+///
 /// Main-thread only. All callbacks are delivered on the main thread.
 final class ContinuousRecognizer {
-    /// Current hypothesis of the utterance in progress (prefix-drop repaired).
+    /// Current hypothesis of the utterance in progress (prefix-drop repaired, never 2+ words shorter
+    /// than what was shown).
     var onInterim: ((String) -> Void)?
     /// A finalized utterance (prefix-drop repaired).
     var onFinal: ((String) -> Void)?
@@ -37,6 +41,7 @@ final class ContinuousRecognizer {
     private var phase = Phase.idle
     private var stream: SpeechStream?
     private var repair = PrefixDropRepair()
+    private var shownText = ShownText()
     private var sessionNumber = 0
     private var sessionStart = Date()
     private var consecutiveFailures = 0
@@ -163,7 +168,13 @@ final class ContinuousRecognizer {
                     self.lastProgress = Date()
                     self.speechSinceProgress = 0
                 }
-                self.onInterim?(self.repair.interim(text))
+                let repaired = self.repair.interim(text)
+                let wasKeeping = self.shownText.keeping
+                let display = self.shownText.interim(repaired)
+                if self.shownText.keeping, !wasKeeping {
+                    self.log("keeping the shown text: Google dropped words" + (self.verbose ? " (now \"\(repaired)\")" : ""))
+                }
+                self.onInterim?(display)
             }
         }
         s.onFinal = { [weak self, weak s] text in
@@ -181,9 +192,9 @@ final class ContinuousRecognizer {
                     }
                     // Out of retries: keep what Google showed rather than lose it, unless it's a
                     // single word, which is more likely noise.
-                    if self.lastInterim.split(separator: " ").count >= 2 {
-                        self.log("using last interim instead of empty final")
-                        text = self.lastInterim
+                    if self.shownText.shown.split(separator: " ").count >= 2 {
+                        self.log("using shown text instead of empty final")
+                        text = self.shownText.shown
                     }
                 }
                 self.recoveries = 0
@@ -193,9 +204,15 @@ final class ContinuousRecognizer {
                     // Too soon to come from new speech: Google re-finalized the pre-roll. (Backstop for
                     // the pre-roll limit in handOver; seen as "من راستش اینجا" typed 4 times.)
                     self.log("dropped duplicate final" + (self.verbose ? " \"\(trimmed)\"" : "") + " (came from the pre-roll)")
+                    self.shownText.reset()
                 } else {
                     if !trimmed.isEmpty { self.previousFinal = trimmed }
-                    self.onFinal?(self.repair.final(text))
+                    let (final, restored) = self.shownText.final(self.repair.final(text))
+                    if let restored {
+                        self.log("final left out \(restored.split(separator: " ").count) shown words; keeping them"
+                                 + (self.verbose ? ": \(restored)" : ""))
+                    }
+                    self.onFinal?(final)
                 }
                 if self.phase == .running { self.handOver() }
             }
@@ -284,6 +301,10 @@ final class ContinuousRecognizer {
             // Replaying didn't help: give up on this utterance's audio and start clean.
             log("still frozen after \(recoveries) replays; starting a fresh session")
             recoveries = 0
+            if let kept = shownText.abandon() {
+                log("using the shown text for the frozen utterance")
+                onFinal?(kept)
+            }
             let old = stream
             openSession(preroll: prerollAudio())
             old?.cancel()

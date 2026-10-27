@@ -24,11 +24,14 @@ import kotlin.math.sqrt
  * Google also sometimes freezes mid-utterance: no more results while the user keeps talking, then
  * an empty final. A watchdog detects this and replays the utterance's audio into a fresh session.
  *
+ * What the user saw is kept ([ShownText]): text doesn't shrink when Google drops words, and words it
+ * showed but left out of its final are put back.
+ *
  * Thread-safe: every public method hops onto the recognizer's own thread, and all callbacks are
  * delivered on that thread.
  */
 class ContinuousRecognizer(private val apiKey: String, private val language: String) {
-    /** Current hypothesis of the utterance in progress (prefix-drop repaired). */
+    /** Current hypothesis of the utterance in progress (prefix-drop repaired, never 2+ words shorter than what was shown). */
     var onInterim: ((String) -> Unit)? = null
     /** A finalized utterance (prefix-drop repaired). */
     var onFinal: ((String) -> Unit)? = null
@@ -53,6 +56,7 @@ class ContinuousRecognizer(private val apiKey: String, private val language: Str
     private var phase = Phase.IDLE
     private var stream: SpeechStream? = null
     private var repair = PrefixDropRepair()
+    private val shownText = ShownText()
     private var sessionNumber = 0
     private var sessionStart = 0L
     private var consecutiveFailures = 0
@@ -157,7 +161,13 @@ class ContinuousRecognizer(private val apiKey: String, private val language: Str
                 lastProgress = System.nanoTime()
                 speechSinceProgress = 0.0
             }
-            onInterim?.invoke(repair.interim(text))
+            val repaired = repair.interim(text)
+            val wasKeeping = shownText.keeping
+            val display = shownText.interim(repaired)
+            if (shownText.keeping && !wasKeeping) {
+                log("keeping the shown text: Google dropped words" + (if (verbose) " (now \"$repaired\")" else ""))
+            }
+            onInterim?.invoke(display)
         }
         s.onFinal = final@{ raw ->
             if (stream !== s || faultSilences()) return@final
@@ -174,9 +184,9 @@ class ContinuousRecognizer(private val apiKey: String, private val language: Str
                 }
                 // Out of retries: keep what Google showed rather than lose it, unless it's a
                 // single word, which is more likely noise.
-                if (lastInterim.split(' ').size >= 2) {
-                    log("using last interim instead of empty final")
-                    text = lastInterim
+                if (shownText.shown.split(' ').count { it.isNotEmpty() } >= 2) {
+                    log("using shown text instead of empty final")
+                    text = shownText.shown
                 }
             }
             recoveries = 0
@@ -185,9 +195,14 @@ class ContinuousRecognizer(private val apiKey: String, private val language: Str
                 // Too soon to come from new speech: Google re-finalized the pre-roll. (Backstop for
                 // the pre-roll limit in handOver; seen as "من راستش اینجا" typed 4 times.)
                 log("dropped duplicate final" + (if (verbose) " \"$trimmed\"" else "") + " (came from the pre-roll)")
+                shownText.reset()
             } else {
                 if (trimmed.isNotEmpty()) previousFinal = trimmed
-                onFinal?.invoke(repair.final(text))
+                val (final, restored) = shownText.final(repair.final(text))
+                if (restored != null) {
+                    log("final left out ${restored.split(' ').size} shown words; keeping them" + (if (verbose) ": $restored" else ""))
+                }
+                onFinal?.invoke(final)
             }
             if (phase == Phase.RUNNING) handOver()
         }
@@ -275,6 +290,10 @@ class ContinuousRecognizer(private val apiKey: String, private val language: Str
             // Replaying didn't help: give up on this utterance's audio and start clean.
             log("still frozen after $recoveries replays; starting a fresh session")
             recoveries = 0
+            shownText.abandon()?.let { kept ->
+                log("using the shown text for the frozen utterance")
+                onFinal?.invoke(kept)
+            }
             val old = stream
             openSession(prerollAudio())
             old?.cancel()
