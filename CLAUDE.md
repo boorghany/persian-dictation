@@ -1,12 +1,14 @@
-# Persian Dictation — macOS app + Android voice keyboard
+# Persian Dictation — macOS app + Android voice keyboard + Windows app
 
 Persian (fa-IR) dictation that uses Google's speech recognizer — the user's quality bar is Gboard's
-voice typing, and other engines (Whisper, Cloud STT, Claude's dictation) were rejected. Two products
+voice typing, and other engines (Whisper, Cloud STT, Claude's dictation) were rejected. Three products
 share one design:
 
 - **macOS** (Swift, repo root): menu-bar app; press a hotkey, speak, text is pasted into any app.
 - **Android** (Kotlin, `android/`): a voice-only keyboard (IME) used *next to* Gboard, so Gboard's swipe
   typing and clipboard history stay available. The user's phone: Xiaomi Poco X6 Pro, latest HyperOS.
+- **Windows** (Kotlin/JVM, `windows/`, since 2026-11-08): notification-area app like the Mac one; it runs the
+  Android `core` engine unchanged, so there is no third port of the workarounds.
 
 Personal use at first; since 2026-10-19 the Android app is also being published on **Cafe Bazaar** (see below).
 
@@ -21,7 +23,8 @@ Personal use at first; since 2026-10-19 the Android app is also being published 
   **1.0.1** on both apps (the user's choice) and counts up from there: the last number (1.0.1 → 1.0.2) for each
   fix or feature, the middle one for big changes. Mac and Android share the sequence: a change to one app takes the
   next free number (Android 1.0.2 while the Mac stays 1.0.1 until its next change, which is then 1.0.3). Mac: `CFBundleShortVersionString` in `Resources/Info.plist`;
-  Android: `versionName` in `android/app/build.gradle*`. The build scripts only bump the build number.
+  Android: `versionName` in `android/app/build.gradle*`; Windows: `appVersion` in `windows/build.gradle.kts` (all three
+  share the sequence). The build scripts only bump the build number.
 - **Commit every change** to the local git repo (branch `main`, created 2026-10-08) after it builds and its
   tests/replays pass: one commit per change, message says what and why, version in the subject when bumped.
   Build output, APKs (`android/dist/`), `local.properties` and caches are git-ignored.
@@ -322,6 +325,54 @@ or wireless adb. Before that: **not yet on the user's phone** — they took the 
 is recommended: HyperOS Developer options → USB debugging + **Install via USB** (needs Mi account) +
 Wireless debugging → pair with code (`adb pair IP:PORT CODE`, then `adb connect`). Real-mic and HyperOS
 behaviour are untested.
+
+## Windows app (`windows/`)
+
+Kotlin/JVM, a Gradle module of the `android/` build (`settings.gradle.kts` maps `:windows` to `../windows`) so it uses
+`:core` directly. Win32 through JNA 5.15 (`jna-platform`), UI with AWT/Swing. Packaged by `jpackage` (Microsoft Build of
+OpenJDK 21, runtime bundled, ~50 MB) as a folder with `Persian Dictation.exe`, zipped for x64 and ARM64.
+
+| File | Role |
+|---|---|
+| `Main.kt` | entry; single instance (lock file; a second launch posts `WM_APP_ALREADY_RUNNING` → notification); `--toggle` (start/stop the running instance), `--transcribe <wav> [lang]`, `--export-diagnostics`, `--write-ico <file>`; `DiagnosticsExport` (info.txt + logs + 48 h of recordings → `%USERPROFILE%\Downloads\PersianDictation-diagnostics-<UTC>.zip`, shown in Explorer) |
+| `App.kt` | tray icon + menu (version, status, Start/Stop, Microphone, Language, Development Mode with a warning dialog, Open Logs Folder, Share Diagnostics…, Start with Windows = HKCU `Run` key, only in the packaged app, Quit); hotkeys; double-click on the icon toggles |
+| `DictationController.kt` | line-by-line port of the Mac controller (held-back line breaks, spoken Enter, Enter-while-finishing); pasted line breaks become CRLF |
+| `WinThread` (`Win32.kt`) | one thread with a hidden message-only window (class `PersianDictationMessageWindow`) and message loop: global hotkeys (`RegisterHotKey`), clipboard rendering, tasks from other threads, `SendInput`, foreground tracking (`SetWinEventHook`) |
+| `Paster.kt` | port of the Mac `TextInserter`. The text goes on the clipboard with **delayed rendering** (`SetClipboardData(CF_UNICODETEXT, NULL)`, rendered on `WM_RENDERFORMAT`) = the Mac's lazy provider, so we know when the app read it (`paste read after N ms`); same hold times, Return queueing and never-read rules. Marked `ExcludeClipboardContentFromMonitorProcessing` / `CanIncludeInClipboardHistory=0` / `CanUploadToCloudClipboard=0` (stays out of Win+V history). The user's clipboard (all memory formats) is restored unless someone else took the clipboard (`WM_DESTROYCLIPBOARD` / owner check). Ctrl+V waits up to 1.5 s for Shift/Ctrl/Alt/Win to be released |
+| `MicCapture.kt` | Java Sound `TargetDataLine` 16 kHz mono (Windows converts); "System Default" = Java's default line; switches to the default if the chosen device stops or sends only zeros for 3 s (zeros on the default → overlay hint about Settings → Privacy & security → Microphone). Test hook: `%LOCALAPPDATA%\Persian Dictation\test-input.wav` is played instead of the mic |
+| `Overlay.kt` | non-activating click-through `JWindow` (WS_EX_NOACTIVATE/TOOLWINDOW/TRANSPARENT) at the top of the primary display, RTL for Persian, last 3 lines; **a new window for every dictation** (a window belongs to one virtual desktop) |
+| `AppIcon.kt` | the Mac icon geometry in Java2D: tray icon (white/black per `SystemUsesLightTheme`, red while listening) and the `.ico` |
+| `Environment.kt` | paths, `Settings` (`%APPDATA%\Persian Dictation\settings.properties`), `Log` (`%LOCALAPPDATA%\Persian Dictation\PersianDictation.log`, rotated at 5 MB; dictated text only in dev mode), version |
+
+Hotkeys: **Ctrl+Alt+Space** toggles (same keys as the Mac's ⌃⌥Space); while listening **Esc / Enter** stop; Enter again
+while finishing = press Enter after the last paste. Our Enter hotkey is unregistered around a spoken "اینتر" Return.
+Starting from the tray menu first gives the focus back to the last app window (the tray click took it).
+Known limits: pastes into apps running as administrator fail (UIPI) — run elevated only if needed; "System Default"
+doesn't follow a change of the Windows default mid-dictation; Java Sound may garble non-ASCII device names.
+
+Build: `windows/build.sh [--install]` (Mac) → bumps `windows/build-number.txt`, runs core tests, `:windows:installDist`,
+writes the `.ico`, stages everything in `~/Downloads/PersianDictation-Windows-build/` (the only Mac folder the VM
+sees, as `Z:\Downloads`; it also caches the two JDK zips, ~200 MB each), then runs `windows/package.ps1` in the
+Parallels VM **"Windows 11"** (ARM64, Windows 11) via `prlctl exec --current-user`: JDKs unpacked once to
+`%LOCALAPPDATA%\PersianDictationBuild`, `jpackage --type app-image` per arch, zips → `windows/dist/` (git-ignored).
+`--install` copies the ARM64 build to `%LOCALAPPDATA%\Programs\Persian Dictation`, adds a Start-menu shortcut and
+launches it. Screenshots of the VM: `prlctl capture "Windows 11" --file x.png`. The VM is the user's (they use Word
+in it): keep tests short and close what you open. Run PowerShell there with
+`prlctl exec "Windows 11" --current-user powershell -NoProfile -EncodedCommand <base64 UTF-16LE>` (quoting through
+prlctl breaks paths with spaces; console output of Persian text comes back as `?`, so return it base64-encoded).
+
+Testing in the VM: `windows/test-paste.ps1` (copied to the staging folder with `target.ps1`, a WinForms text box used as
+the paste target — Windows 11 Notepad restores unsaved tabs, which mixed runs; if Notepad is ever used, delete only
+your own files in its `LocalState\TabState`). `-Finals <utf8 file>` sends each line through the hidden test hook
+`--paste-test @file` (the running app handles it like a Google final, spoken punctuation included, and shows it in the
+overlay for 3 s) — no network needed; `-Wav <file>` dictates a recording via `test-input.wav` + `--toggle`.
+2026-11-08 (1.0.3 build 6): the paste test passed on ARM64 (text, spacing, ، ؟ . and CRLF exact; clipboard restored;
+reads after 7–530 ms), overlay checked in screenshots (Persian RTL, 3 lines), the x64 build starts under emulation.
+**Not yet tested with Google on Windows**: the VM had no network (adapter on 169.254.x, no DHCP from Parallels shared
+networking — not changed by us); the engine itself passed `--transcribe` of the dropped-tail recording on the Mac.
+No real-mic test (the VM lists no capture device) and the tray icon wasn't visible (VM in Coherence mode).
+Parallels' clipboard sharing (`prl_cc`) reads every clipboard change despite the exclusion formats, so inside the VM a
+"paste read" can come from Parallels, not the target app.
 
 ## Testing
 

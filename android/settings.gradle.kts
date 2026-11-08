@@ -14,4 +14,6 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "PersianDictationAndroid"
-include(":core", ":replay", ":app")
+include(":core", ":replay", ":app", ":windows")
+// The Windows app lives at the repo root next to the Mac app, but shares this build for `:core`.
+project(":windows").projectDir = file("../windows")

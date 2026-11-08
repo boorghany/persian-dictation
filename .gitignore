@@ -4,3 +4,7 @@ build.noindex/
 
 # Release signing key for Cafe Bazaar: never commit, back it up (losing it means no more updates).
 android/signing/
+
+# Windows app: build output and packaged zips.
+windows/build/
+windows/dist/
