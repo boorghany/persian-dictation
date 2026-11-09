@@ -5,7 +5,6 @@ import com.sun.jna.platform.win32.WinDef.HWND
 import com.sun.jna.platform.win32.WinDef.LPARAM
 import com.sun.jna.platform.win32.WinDef.WPARAM
 import java.awt.GraphicsEnvironment
-import java.awt.SystemTray
 import java.io.File
 import java.io.RandomAccessFile
 import java.time.Instant
@@ -21,11 +20,19 @@ import kotlin.system.exitProcess
 import local.voice2text.core.ContinuousRecognizer
 import local.voice2text.core.SpeechStream
 
+/**
+ * Held for the app's lifetime. As a local in main() it was garbage collected after startup, which released
+ * the lock, and a second launch started a second copy (found when the installer's `--quit` did that).
+ */
+@Volatile private var instanceLock: java.nio.channels.FileLock? = null
+
 fun main(args: Array<String>) {
     when (args.firstOrNull()) {
         "--write-ico" -> { AppIcon.writeIco(File(args[1])); return }
         "--transcribe" -> transcribe(args.drop(1))
         "--toggle" -> { exitProcess(if (signalRunningInstance(WinThread.WM_APP_TOGGLE)) 0 else 1) }
+        // The installer/uninstaller: ask a running copy to quit; exits 0 also when none is running.
+        "--quit" -> { signalRunningInstance(WinThread.WM_APP_QUIT); exitProcess(0) }
         // `@file`: UTF-8 text from a file (Windows passes non-ASCII arguments through the ANSI code page).
         "--paste-test" -> {
             val text = args[1].let { if (it.startsWith("@")) File(it.drop(1)).readText().trimEnd('\r', '\n') else it }
@@ -36,8 +43,8 @@ fun main(args: Array<String>) {
 
     // One instance: a second launch tells the first one (it shows a notification) and quits.
     AppPaths.data.mkdirs()
-    val lock = RandomAccessFile(AppPaths.lock, "rw").channel.tryLock()
-    if (lock == null) {
+    instanceLock = RandomAccessFile(AppPaths.lock, "rw").channel.tryLock()
+    if (instanceLock == null) {
         signalRunningInstance(WinThread.WM_APP_ALREADY_RUNNING)
         exitProcess(0)
     }
@@ -50,11 +57,6 @@ fun main(args: Array<String>) {
     )
     App.pruneRecordings()
     runCatching { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) }
-    if (GraphicsEnvironment.isHeadless() || !SystemTray.isSupported()) {
-        Log.write("no notification area; quitting")
-        JOptionPane.showMessageDialog(null, "Persian Dictation needs the Windows notification area.")
-        exitProcess(1)
-    }
     WinThread.start()
     SwingUtilities.invokeLater {
         try {
@@ -70,15 +72,14 @@ fun main(args: Array<String>) {
 /** Posts [message] to the running instance's hidden window. */
 private fun signalRunningInstance(message: Int): Boolean {
     val user32 = User32.INSTANCE
-    val messageOnly = HWND(com.sun.jna.Pointer.createConstant(-3L))
-    val hwnd = user32.FindWindowEx(messageOnly, null, WinThread.CLASS_NAME, null) ?: return false
+    val hwnd = user32.FindWindow(WinThread.CLASS_NAME, null) ?: return false
     return user32.PostMessage(hwnd, message, WPARAM(0), LPARAM(0)).let { true }
 }
 
 /** Test hook: the running instance pastes [text] as if it were a final from Google (spoken punctuation included). */
 private fun sendPasteTest(text: String): Boolean {
     val user32 = User32.INSTANCE
-    val hwnd = user32.FindWindowEx(HWND(com.sun.jna.Pointer.createConstant(-3L)), null, WinThread.CLASS_NAME, null) ?: return false
+    val hwnd = user32.FindWindow(WinThread.CLASS_NAME, null) ?: return false
     val bytes = text.toByteArray(Charsets.UTF_8)
     val mem = com.sun.jna.Memory(maxOf(1, bytes.size).toLong()).apply { write(0, bytes, 0, bytes.size) }
     val data = com.sun.jna.platform.win32.WinUser.COPYDATASTRUCT()

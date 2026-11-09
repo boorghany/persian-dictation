@@ -60,12 +60,14 @@ class Delayed {
  * text when the target app asks for it), and the foreground-window tracking.
  */
 object WinThread {
-    const val CLASS_NAME = "PersianDictationMessageWindow"
+    const val CLASS_NAME = "PersianDictationHiddenWindow"
     private const val WM_APP_TASKS = 0x8000
     /** Sent by a second launch with `--toggle`. */
     const val WM_APP_TOGGLE = 0x8001
     /** Sent by a second launch without arguments: the app is already running. */
     const val WM_APP_ALREADY_RUNNING = 0x8002
+    /** Sent by `--quit` (the installer and uninstaller close a running copy this way). */
+    const val WM_APP_QUIT = 0x8003
     private const val WM_HOTKEY = 0x0312
     private const val WM_COPYDATA = 0x004A
     /** WM_COPYDATA tag for `--paste-test <text>`. */
@@ -73,6 +75,10 @@ object WinThread {
     private const val WM_RENDERFORMAT = 0x0305
     private const val WM_RENDERALLFORMATS = 0x0306
     private const val WM_DESTROYCLIPBOARD = 0x0307
+    private const val WM_SETTINGCHANGE = 0x001A
+    /** Notification-area icon events (see [Tray]). */
+    const val WM_APP_TRAY = 0x800A
+    private var wmTaskbarCreated = 0
     const val MOD_ALT = 0x1
     const val MOD_CONTROL = 0x2
     private const val MOD_NOREPEAT = 0x4000
@@ -86,8 +92,14 @@ object WinThread {
     /** Called on the EDT. */
     var onToggleRequest: (() -> Unit)? = null
     var onSecondLaunch: (() -> Unit)? = null
+    var onQuitRequest: (() -> Unit)? = null
     /** Test hook: text from `--paste-test`, handled like a final from Google. */
     var onPasteTest: ((String) -> Unit)? = null
+    /** A click on the tray icon (event, x, y in screen pixels). */
+    var onTrayEvent: ((Int, Int, Int) -> Unit)? = null
+    /** Explorer restarted (re-add the tray icon) or the light/dark theme changed. */
+    var onTaskbarCreated: (() -> Unit)? = null
+    var onThemeChanged: (() -> Unit)? = null
 
     private val tasks = ConcurrentLinkedQueue<Runnable>()
     private val timer = Executors.newSingleThreadScheduledExecutor { Thread(it, "win32-timer").apply { isDaemon = true } }
@@ -103,7 +115,9 @@ object WinThread {
 
     fun start() {
         val ready = CountDownLatch(1)
-        thread = Thread({ run(ready) }, "win32").apply { isDaemon = true; start() }
+        // Not a daemon: this thread's message loop is what keeps the app running. (AWT shuts down when it has
+        // no windows, and the tray icon is native, so without it the JVM quietly exited after startup.)
+        thread = Thread({ run(ready) }, "win32").apply { isDaemon = false; start() }
         ready.await()
     }
 
@@ -115,8 +129,11 @@ object WinThread {
         wc.lpfnWndProc = windowProc
         wc.lpszClassName = CLASS_NAME
         user32.RegisterClassEx(wc)
-        val messageOnly = HWND(Pointer.createConstant(-3L)) // HWND_MESSAGE
-        hwnd = user32.CreateWindowEx(0, CLASS_NAME, "Persian Dictation", 0, 0, 0, 0, 0, messageOnly, null, instance, null)
+        // A hidden top-level window, never shown. Not message-only: the tray menu needs a window that can be
+        // brought to the front, and only top-level windows get the TaskbarCreated and theme broadcasts.
+        hwnd = user32.CreateWindowEx(0x80 /* WS_EX_TOOLWINDOW */, CLASS_NAME, "Persian Dictation",
+            0x80000000.toInt() /* WS_POPUP */, 0, 0, 0, 0, null, null, instance, null)
+        wmTaskbarCreated = Win32Extra.INSTANCE.RegisterWindowMessageW(WString("TaskbarCreated"))
         winEventProc = WinUser.WinEventProc { _, _, h, _, _, _, _ -> foregroundChanged(h) }
         user32.SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, null, winEventProc, 0, 0, WINEVENT_SKIPOWNPROCESS)
         lastAppWindow = user32.GetForegroundWindow()
@@ -143,6 +160,10 @@ object WinThread {
                     SwingUtilities.invokeLater { onToggleRequest?.invoke() }
                     return LRESULT(0)
                 }
+                WM_APP_QUIT -> {
+                    SwingUtilities.invokeLater { onQuitRequest?.invoke() }
+                    return LRESULT(0)
+                }
                 WM_APP_ALREADY_RUNNING -> {
                     SwingUtilities.invokeLater { onSecondLaunch?.invoke() }
                     return LRESULT(0)
@@ -164,6 +185,22 @@ object WinThread {
                     return LRESULT(0)
                 }
                 WM_DESTROYCLIPBOARD -> Paster.clipboardDestroyed()
+                WM_APP_TRAY -> {
+                    // NOTIFYICON_VERSION_4: event in LOWORD(lParam), anchor point in wParam.
+                    val event = (l.toLong() and 0xFFFF).toInt()
+                    val x = (w.toLong() and 0xFFFF).toShort().toInt()
+                    val y = ((w.toLong() shr 16) and 0xFFFF).toShort().toInt()
+                    SwingUtilities.invokeLater { onTrayEvent?.invoke(event, x, y) }
+                    return LRESULT(0)
+                }
+                WM_SETTINGCHANGE -> {
+                    val area = if (l.toLong() != 0L) runCatching { Pointer(l.toLong()).getWideString(0) }.getOrNull() else null
+                    if (area == "ImmersiveColorSet") SwingUtilities.invokeLater { onThemeChanged?.invoke() }
+                }
+                else -> if (msg == wmTaskbarCreated && wmTaskbarCreated != 0) {
+                    SwingUtilities.invokeLater { onTaskbarCreated?.invoke() }
+                    return LRESULT(0)
+                }
             }
         } catch (e: Throwable) {
             Log.write("win32 message $msg failed: $e")

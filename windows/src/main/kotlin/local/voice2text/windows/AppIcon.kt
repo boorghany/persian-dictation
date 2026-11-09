@@ -4,12 +4,10 @@ import java.awt.BasicStroke
 import java.awt.Color
 import java.awt.GradientPaint
 import java.awt.Graphics2D
-import java.awt.Image
 import java.awt.RenderingHints
 import java.awt.geom.Arc2D
 import java.awt.geom.Line2D
 import java.awt.geom.RoundRectangle2D
-import java.awt.image.BaseMultiResolutionImage
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -44,22 +42,18 @@ object AppIcon {
         }
     }
 
-    /** Notification-area icon: white or black to suit the taskbar, red while listening. */
-    fun trayImage(listening: Boolean, lightTaskbar: Boolean): Image {
+    /** Notification-area icon at [size] px: white or black to suit the taskbar, red while listening. */
+    fun trayBitmap(size: Int, listening: Boolean, lightTaskbar: Boolean): BufferedImage {
         val color = when {
             listening -> Color(232, 64, 52)
-            lightTaskbar -> Color(20, 20, 20)
+            lightTaskbar -> Color(28, 28, 28)
             else -> Color.WHITE
         }
-        val sizes = listOf(16, 20, 24, 32, 40, 48, 64)
-        val images = sizes.map { size ->
-            BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB).also { img ->
-                val g = img.createGraphics()
-                drawGlyph(g, 0.0, size * 0.04, size.toDouble(), color)
-                g.dispose()
-            }
+        return BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB).also { img ->
+            val g = img.createGraphics()
+            drawGlyph(g, 0.0, size * 0.04, size.toDouble(), color)
+            g.dispose()
         }
-        return BaseMultiResolutionImage(*images.toTypedArray())
     }
 
     /** Full app icon: a rounded square in Persian turquoise to blue with the white glyph. */

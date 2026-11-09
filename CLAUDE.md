@@ -329,50 +329,68 @@ behaviour are untested.
 ## Windows app (`windows/`)
 
 Kotlin/JVM, a Gradle module of the `android/` build (`settings.gradle.kts` maps `:windows` to `../windows`) so it uses
-`:core` directly. Win32 through JNA 5.15 (`jna-platform`), UI with AWT/Swing. Packaged by `jpackage` (Microsoft Build of
-OpenJDK 21, runtime bundled, ~50 MB) as a folder with `Persian Dictation.exe`, zipped for x64 and ARM64.
+`:core` directly. Win32 through JNA 5.15 (`jna-platform`); the overlay is Swing, the tray icon and menu are native Win32.
+Packaged by `jpackage` (Microsoft Build of OpenJDK 21, runtime bundled) per arch, then **one installer for both**:
+`PersianDictation-<version>-build<N>-Setup.exe` (Inno Setup, ~45 MB) — what to give users. Portable zips too.
 
 | File | Role |
 |---|---|
-| `Main.kt` | entry; single instance (lock file; a second launch posts `WM_APP_ALREADY_RUNNING` → notification); `--toggle` (start/stop the running instance), `--transcribe <wav> [lang]`, `--export-diagnostics`, `--write-ico <file>`; `DiagnosticsExport` (info.txt + logs + 48 h of recordings → `%USERPROFILE%\Downloads\PersianDictation-diagnostics-<UTC>.zip`, shown in Explorer) |
-| `App.kt` | tray icon + menu (version, status, Start/Stop, Microphone, Language, Development Mode with a warning dialog, Open Logs Folder, Share Diagnostics…, Start with Windows = HKCU `Run` key, only in the packaged app, Quit); hotkeys; double-click on the icon toggles |
-| `DictationController.kt` | line-by-line port of the Mac controller (held-back line breaks, spoken Enter, Enter-while-finishing); pasted line breaks become CRLF |
-| `WinThread` (`Win32.kt`) | one thread with a hidden message-only window (class `PersianDictationMessageWindow`) and message loop: global hotkeys (`RegisterHotKey`), clipboard rendering, tasks from other threads, `SendInput`, foreground tracking (`SetWinEventHook`) |
-| `Paster.kt` | port of the Mac `TextInserter`. The text goes on the clipboard with **delayed rendering** (`SetClipboardData(CF_UNICODETEXT, NULL)`, rendered on `WM_RENDERFORMAT`) = the Mac's lazy provider, so we know when the app read it (`paste read after N ms`); same hold times, Return queueing and never-read rules. Marked `ExcludeClipboardContentFromMonitorProcessing` / `CanIncludeInClipboardHistory=0` / `CanUploadToCloudClipboard=0` (stays out of Win+V history). The user's clipboard (all memory formats) is restored unless someone else took the clipboard (`WM_DESTROYCLIPBOARD` / owner check). Ctrl+V waits up to 1.5 s for Shift/Ctrl/Alt/Win to be released |
-| `MicCapture.kt` | Java Sound `TargetDataLine` 16 kHz mono (Windows converts); "System Default" = Java's default line; switches to the default if the chosen device stops or sends only zeros for 3 s (zeros on the default → overlay hint about Settings → Privacy & security → Microphone). Test hook: `%LOCALAPPDATA%\Persian Dictation\test-input.wav` is played instead of the mic |
-| `Overlay.kt` | non-activating click-through `JWindow` (WS_EX_NOACTIVATE/TOOLWINDOW/TRANSPARENT) at the top of the primary display, RTL for Persian, last 3 lines; **a new window for every dictation** (a window belongs to one virtual desktop) |
-| `AppIcon.kt` | the Mac icon geometry in Java2D: tray icon (white/black per `SystemUsesLightTheme`, red while listening) and the `.ico` |
+| `Main.kt` | entry; single instance (lock file kept in a global — as a local it was garbage collected and a second launch started a second copy, fixed 1.0.4); a second launch posts `WM_APP_ALREADY_RUNNING` → notification. CLI: `--toggle`, `--quit` (installer/uninstaller), `--transcribe <wav> [lang]`, `--export-diagnostics`, `--write-ico <file>`, test hook `--paste-test <text or @utf8-file>` (handled like a Google final, shown in the overlay for 3 s). `DiagnosticsExport` → `%USERPROFILE%\Downloads\PersianDictation-diagnostics-<UTC>.zip` |
+| `App.kt` | tray menu content and commands (version, Start/Stop with the shortcut, Language ▸, Microphone ▸, Start with Windows = HKCU `Run` value "Persian Dictation", Development Mode with a native warning box, Open Logs Folder, Share Diagnostics…, Quit); hotkeys; left or right click on the icon opens the menu |
+| `Tray.kt` | native tray: `Shell_NotifyIcon` (NOTIFYICON_VERSION_4, re-added on `TaskbarCreated`, icon rebuilt on theme change), HICON from Java2D via `CreateIconIndirect`, menu via `TrackPopupMenuEx`, notifications (`NIF_INFO`), `MessageBoxW`. **1.0.3 used Java's AWT `TrayIcon`/`PopupMenu`; the user found that menu very bad** (old classic menu) — the native menu is what they accepted ("the menu's look is fine now, don't work on it more", 2026-11-09). It still draws in the plain style (square corners): an activation context with Common Controls 6 and the undocumented uxtheme dark-mode ordinals were tried and made no difference — don't spend more time on it. After the menu closes, focus goes back to the last app window (else Esc left our hidden window focused and the next dictation pasted into nothing) |
+| `DictationController.kt` | line-by-line port of the Mac controller (held-back line breaks, spoken Enter, Enter-while-finishing); pasted line breaks become CRLF. Like the Mac, a new dictation's first paste never gets a leading space (no reading of the field) |
+| `WinThread` (`Win32.kt`) | **non-daemon** thread (it keeps the JVM alive: with no AWT window AWT shuts down, and 1.0.4 build 8 quietly exited after startup) with a hidden top-level window (class `PersianDictationHiddenWindow`, never shown; top-level so the menu can take the foreground and `TaskbarCreated`/`WM_SETTINGCHANGE` arrive) and a message loop: hotkeys, clipboard rendering, tray callbacks (`WM_APP_TRAY`), tasks from other threads, `SendInput`, foreground tracking (`SetWinEventHook`) |
+| `Paster.kt` | port of the Mac `TextInserter`. The text goes on the clipboard with **delayed rendering** (`SetClipboardData(CF_UNICODETEXT, NULL)`, rendered on `WM_RENDERFORMAT`) = the Mac's lazy provider, so we know when the app read it (`paste read after N ms`, dev log also `paste into <window class>`); same hold times, Return queueing and never-read rules. Marked `ExcludeClipboardContentFromMonitorProcessing` / `CanIncludeInClipboardHistory=0` / `CanUploadToCloudClipboard=0`. The user's clipboard (all memory formats) is restored unless someone else took it. Ctrl+V waits up to 1.5 s for Shift/Ctrl/Alt/Win to be released |
+| `MicCapture.kt` | Java Sound `TargetDataLine` 16 kHz mono (Windows converts); "System Default" = Java's default line; switches to the default if the chosen device stops or sends only zeros for 3 s (zeros on the default → overlay hint about Settings → Privacy & security → Microphone). Test hook `%LOCALAPPDATA%\Persian Dictation\test-input.wav` — **only in Development Mode** (1.0.4: a leftover test file from a failed test run replaced the user's mic when they tried the app) |
+| `Overlay.kt` | non-activating click-through `JWindow` at the top of the primary display, RTL for Persian, last 3 lines; a new window for every dictation (a window belongs to one virtual desktop) |
+| `AppIcon.kt` | the Mac icon geometry in Java2D: tray bitmap (black/white per `SystemUsesLightTheme`, red while listening) and the `.ico` |
 | `Environment.kt` | paths, `Settings` (`%APPDATA%\Persian Dictation\settings.properties`), `Log` (`%LOCALAPPDATA%\Persian Dictation\PersianDictation.log`, rotated at 5 MB; dictated text only in dev mode), version |
+| `installer.iss` | Inno Setup: per-user (no admin prompt) into `%LOCALAPPDATA%\Programs\Persian Dictation`, picks the x64 or ARM64 build, Start-menu shortcut, tasks "Start with Windows" (on) and desktop icon (off), launches after install; closes a running copy first (`--quit`, not waited on, then `taskkill`); uninstall also removes the Run value and the settings/logs/recordings folders. Unsigned → SmartScreen shows "Windows protected your PC" (More info → Run anyway) |
 
 Hotkeys: **Ctrl+Alt+Space** toggles (same keys as the Mac's ⌃⌥Space); while listening **Esc / Enter** stop; Enter again
 while finishing = press Enter after the last paste. Our Enter hotkey is unregistered around a spoken "اینتر" Return.
-Starting from the tray menu first gives the focus back to the last app window (the tray click took it).
-Known limits: pastes into apps running as administrator fail (UIPI) — run elevated only if needed; "System Default"
-doesn't follow a change of the Windows default mid-dictation; Java Sound may garble non-ASCII device names.
+Known limits: pastes into apps running as administrator fail (UIPI); "System Default" doesn't follow a change of the
+Windows default mid-dictation; Java Sound may garble non-ASCII device names.
 
 Build: `windows/build.sh [--install]` (Mac) → bumps `windows/build-number.txt`, runs core tests, `:windows:installDist`,
 writes the `.ico`, stages everything in `~/Downloads/PersianDictation-Windows-build/` (the only Mac folder the VM
-sees, as `Z:\Downloads`; it also caches the two JDK zips, ~200 MB each), then runs `windows/package.ps1` in the
-Parallels VM **"Windows 11"** (ARM64, Windows 11) via `prlctl exec --current-user`: JDKs unpacked once to
-`%LOCALAPPDATA%\PersianDictationBuild`, `jpackage --type app-image` per arch, zips → `windows/dist/` (git-ignored).
-`--install` copies the ARM64 build to `%LOCALAPPDATA%\Programs\Persian Dictation`, adds a Start-menu shortcut and
-launches it. Screenshots of the VM: `prlctl capture "Windows 11" --file x.png`. The VM is the user's (they use Word
-in it): keep tests short and close what you open. Run PowerShell there with
-`prlctl exec "Windows 11" --current-user powershell -NoProfile -EncodedCommand <base64 UTF-16LE>` (quoting through
-prlctl breaks paths with spaces; console output of Persian text comes back as `?`, so return it base64-encoded).
+sees, as `Z:\Downloads`; it caches the two JDK zips, ~200 MB each, and `innosetup.exe`), then runs `windows/package.ps1`
+in the Parallels VM **"Windows 11"** (ARM64) via `prlctl exec --current-user`: JDKs unpacked once and Inno Setup
+installed once under `%LOCALAPPDATA%\PersianDictationBuild`, `jpackage --type app-image` per arch, zips, `ISCC` →
+Setup.exe; all copied to `windows/dist/` (git-ignored). `--install` runs the Setup silently (`/MERGETASKS=!startup`) and
+launches the app. A full build takes ~10 min (Inno's compression under emulation): run it in the background.
 
-Testing in the VM: `windows/test-paste.ps1` (copied to the staging folder with `target.ps1`, a WinForms text box used as
-the paste target — Windows 11 Notepad restores unsaved tabs, which mixed runs; if Notepad is ever used, delete only
-your own files in its `LocalState\TabState`). `-Finals <utf8 file>` sends each line through the hidden test hook
-`--paste-test @file` (the running app handles it like a Google final, spoken punctuation included, and shows it in the
-overlay for 3 s) — no network needed; `-Wav <file>` dictates a recording via `test-input.wav` + `--toggle`.
-2026-11-08 (1.0.3 build 6): the paste test passed on ARM64 (text, spacing, ، ؟ . and CRLF exact; clipboard restored;
-reads after 7–530 ms), overlay checked in screenshots (Persian RTL, 3 lines), the x64 build starts under emulation.
-**Not yet tested with Google on Windows**: the VM had no network (adapter on 169.254.x, no DHCP from Parallels shared
-networking — not changed by us); the engine itself passed `--transcribe` of the dropped-tail recording on the Mac.
-No real-mic test (the VM lists no capture device) and the tray icon wasn't visible (VM in Coherence mode).
-Parallels' clipboard sharing (`prl_cc`) reads every clipboard change despite the exclusion formats, so inside the VM a
-"paste read" can come from Parallels, not the target app.
+VM etiquette and tools: the VM is the user's (they use Word in it); keep tests short, close what you open. Every
+`prlctl exec` console command opens a Windows Terminal window titled `prl_tools_service.exe` that takes the focus (it
+closes menus and flyouts; wait ~3 s after starting before clicking); `conhost --headless` doesn't work there. Pass scripts
+as `-EncodedCommand` (UTF-16LE base64) and send output to a UTF-8 file in the staging folder (console output turns
+Persian into `?`); in PowerShell pass `[NullString]::Value`, not `$null`, for a null string argument.
+Screenshots: `prlctl capture "Windows 11" --file x.png` (2758×1664, 200 %; overlapping captures come out half black).
+Test helpers in `windows/` (copied to the staging folder): `test-paste.ps1` (`-Finals <utf8 file>` via `--paste-test`,
+`-Wav <file>` via `test-input.wav` — needs Development Mode on —, `-Mic -Seconds N`; target is `target.ps1`, a WinForms
+text box — Windows 11 Notepad restores unsaved tabs, which mixed runs), `keys.ps1 -Keys 'Ctrl+Alt+Space'|Esc|Enter|Down…`,
+`click.ps1 -X -Y [-Right]` (physical pixels = screenshot pixels), `tray-click.ps1` (posts the tray-click message so the
+menu opens at a point; menu items then at fixed offsets, see the 2026-11-09 tests). Synthetic arrow keys into the menu
+were unreliable; click items instead. Running a scenario as `-File` directly with prlctl is more reliable than long
+`-EncodedCommand` snippets.
+
+Tests 2026-11-09 (1.0.4, ARM64 VM, real Google): regression recordings through `test-input.wav` into the text box —
+05-55-36-first12s, dropped-tail (6 shown words kept, «…دیکتیشن؟ الان یه چیز بی‌ربط»), repeated-final (typed once),
+05-54-38 (57 s, 8 finals) all exact; clipboard restored every time. Keyboard: Ctrl+Alt+Space starts, spoken «اینتر»
+presses Enter and keeps listening, Esc stops, Enter stops, Enter Enter sends after the last paste. Menu: Start Dictation
+pastes into the previous app, Esc-closed menu then hotkey pastes into the app, Language and Microphone items, Start with
+Windows on/off (Run value with the exe path), Quit removes the icon. Real microphone: the device is listed and a room
+speech final was recognized and pasted; playing a recording from the Mac's speaker failed only because the Mac's
+output volume was at 4 % (not changed by us). Parallels' clipboard sharing (`prl_cc`) reads every clipboard change, so
+inside the VM a "paste read" can come from Parallels. The 2026-11-08 VM network outage (169.254.x) fixed itself.
+Installer (build 19): silent install, upgrade over a running copy (closed via `--quit`, exit 0), single instance after
+two launches, uninstall (app folder, settings/logs folders, Start-menu shortcut, Run value and uninstall entry all gone),
+reinstall — all checked in the VM; the wizard was looked at in a screenshot. Pitfalls found on the way: files unpacked
+from the Mac share are **read-only** and jpackage kept that, so Setup couldn't replace them on update (package.ps1 now
+clears the attribute; `overwritereadonly`); an empty `{app}` folder stayed after uninstall while the uninstaller's
+`--quit` still ran from it (now waited for); in the `.iss` `[Code]`, a `{constant}` inside a `{ … }` comment ends the
+comment (compile error). Setup remembers task choices from earlier installs (the VM's test installs had "Start with
+Windows" off). `windows/build.sh --install` takes ~10 min.
 
 ## Testing
 

@@ -10,7 +10,7 @@ kotlin {
 }
 
 /** Set by hand for every change (shared sequence with the Mac and Android apps, see CLAUDE.md). */
-val appVersion = "1.0.3"
+val appVersion = "1.0.4"
 val buildNumber = file("build-number.txt").takeIf { it.exists() }?.readText()?.trim() ?: "0"
 
 dependencies {

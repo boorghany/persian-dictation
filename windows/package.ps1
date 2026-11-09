@@ -1,5 +1,6 @@
 # Runs inside the Windows VM (called by windows/build.sh): jpackage app images for x64 and ARM64,
-# zipped into dist\. With -Install, installs the ARM64 one for this user and launches it.
+# zipped into dist\, plus one Setup.exe for both (Inno Setup, installed once into the build folder).
+# With -Install, runs that Setup silently (as a user would, minus the wizard) and launches the app.
 param([Parameter(Mandatory)][string]$Version, [Parameter(Mandatory)][string]$Build, [switch]$Install)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -34,6 +35,9 @@ foreach ($arch in @('x64', 'aarch64')) {
         --java-options '-Xmx256m' --java-options '-XX:+UseSerialGC' `
         --dest $out
     if ($LASTEXITCODE -ne 0) { throw "jpackage ($arch) failed" }
+    # Files unpacked from the Mac share are read-only, and jpackage keeps that: installed read-only, they
+    # can't be replaced by the next update. Clear it.
+    Get-ChildItem $out -Recurse -File | Where-Object IsReadOnly | ForEach-Object { $_.IsReadOnly = $false }
     $zip = Join-Path $stage "dist\PersianDictation-$Version-build$Build-windows-$label.zip"
     Remove-Item -Force $zip -ErrorAction SilentlyContinue
     tar -a -c -f $zip -C $out 'Persian Dictation'
@@ -41,18 +45,23 @@ foreach ($arch in @('x64', 'aarch64')) {
     Write-Output "built $zip"
 }
 
+# Installer: Inno Setup, installed once for this user into the build folder.
+$iscc = Join-Path $work 'InnoSetup\ISCC.exe'
+if (-not (Test-Path $iscc)) {
+    Start-Process "$stage\innosetup.exe" -Wait -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', "/DIR=$work\InnoSetup", '/NOICONS')
+}
+$setupName = "PersianDictation-$Version-build$Build-Setup"
+& $iscc /Qp "/DVersion=$Version" "/DBuild=$Build" "/DX64Dir=$work\out-x64\Persian Dictation" `
+    "/DArm64Dir=$work\out-arm64\Persian Dictation" "/DIconFile=$stage\PersianDictation.ico" "/DOutDir=$stage\dist" `
+    "$stage\installer.iss"
+if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed' }
+Write-Output "built $stage\dist\$setupName.exe"
+
 if ($Install) {
-    $running = Get-Process -Name 'Persian Dictation' -ErrorAction SilentlyContinue
-    if ($running) { $running | Stop-Process -Force; Start-Sleep -Milliseconds 800 }
+    # Silent install: keeps "Start with Windows" off (a test install shouldn't change that).
+    $p = Start-Process "$stage\dist\$setupName.exe" -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/MERGETASKS=!startup')
+    if ($p.ExitCode -ne 0) { throw "Setup failed ($($p.ExitCode))" }
     $dest = Join-Path $env:LOCALAPPDATA 'Programs\Persian Dictation'
-    Remove-Item -Recurse -Force $dest -ErrorAction SilentlyContinue
-    New-Item -ItemType Directory -Force (Split-Path $dest) | Out-Null
-    Copy-Item -Recurse (Join-Path $work 'out-arm64\Persian Dictation') $dest
-    $shell = New-Object -ComObject WScript.Shell
-    $lnk = $shell.CreateShortcut("$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Persian Dictation.lnk")
-    $lnk.TargetPath = "$dest\Persian Dictation.exe"
-    $lnk.WorkingDirectory = $dest
-    $lnk.Save()
     Start-Process "$dest\Persian Dictation.exe"
-    Write-Output "installed and launched $dest"
+    Write-Output "installed with Setup and launched $dest"
 }

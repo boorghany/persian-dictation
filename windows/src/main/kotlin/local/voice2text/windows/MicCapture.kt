@@ -28,7 +28,8 @@ class MicCapture {
         private set
 
     fun start() {
-        val test = AppPaths.testInput.takeIf { it.exists() }
+        // Only in development mode, so a leftover test file can never replace the user's microphone.
+        val test = AppPaths.testInput.takeIf { Settings.developmentMode && it.exists() }
         running = true
         if (test != null) {
             deviceName = "test-input.wav"

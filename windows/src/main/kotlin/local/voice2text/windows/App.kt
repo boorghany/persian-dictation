@@ -2,33 +2,17 @@ package local.voice2text.windows
 
 import com.sun.jna.platform.win32.Advapi32Util
 import com.sun.jna.platform.win32.WinReg
-import java.awt.CheckboxMenuItem
-import java.awt.Menu
-import java.awt.MenuItem
-import java.awt.PopupMenu
-import java.awt.SystemTray
-import java.awt.TrayIcon
-import java.awt.event.ItemEvent
-import java.awt.event.MouseAdapter
-import java.awt.event.MouseEvent
-import javax.swing.JFrame
-import javax.swing.JOptionPane
+import java.awt.image.BufferedImage
+import javax.swing.SwingUtilities
 import kotlin.system.exitProcess
 import local.voice2text.core.WavRecorder
 
-/** Notification-area icon, menu and global hotkeys. EDT only. Port of the Mac `AppDelegate`. */
+/** Notification-area icon, its menu and the global hotkeys. EDT only. Port of the Mac `AppDelegate`. */
 class App {
     private val controller = DictationController()
-    private lateinit var tray: TrayIcon
-    private val menu = PopupMenu()
-    private val statusItem = MenuItem("Ready").apply { isEnabled = false }
-    private val toggleItem = MenuItem("Start Dictation   Ctrl+Alt+Space")
-    private val microphoneMenu = Menu("Microphone")
-    private val languageMenu = Menu("Language")
-    private val developmentItem = CheckboxMenuItem("Development Mode (log + record audio)")
-    private val startupItem = CheckboxMenuItem("Start with Windows")
-    private val languages = listOf("Persian (fa-IR)" to "fa-IR", "English (en-US)" to "en-US")
     private var toggleRegistered = false
+    private var menuOpen = false
+    private val languages = listOf("Persian (fa-IR)" to "fa-IR", "English (en-US)" to "en-US")
 
     fun start() {
         controller.onStateChange = { state ->
@@ -46,7 +30,7 @@ class App {
                     WinThread.unregisterHotKey(ID_ENTER)
                 }
             }
-            refresh()
+            updateIcon()
         }
         // A spoken "اینتر" presses Return in the target app: our own Enter hotkey must not catch it.
         // Called on the Win32 thread (WinThread.sync runs inline there).
@@ -55,38 +39,31 @@ class App {
             else if (controller.state != DictationController.State.IDLE) registerEnter()
         }
         WinThread.onToggleRequest = { controller.toggle() }
+        WinThread.onQuitRequest = { quit() }
         WinThread.onPasteTest = { controller.testFinal(it) }
-        WinThread.onSecondLaunch = {
-            tray.displayMessage("Persian Dictation is already running", "Press Ctrl+Alt+Space to dictate.", TrayIcon.MessageType.INFO)
+        WinThread.onSecondLaunch = { Tray.notify("Persian Dictation is already running", "Press Ctrl+Alt+Space to dictate.") }
+        WinThread.onTrayEvent = { event, x, y ->
+            if (event == Tray.EVENT_CONTEXTMENU || event == Tray.EVENT_SELECT || event == Tray.EVENT_KEYSELECT) showMenu(x, y)
         }
+        WinThread.onTaskbarCreated = { Tray.add(iconImage(), tooltip()) }
+        WinThread.onThemeChanged = { updateIcon() }
 
         // Keep the startup entry pointing at this copy if the folder was moved.
         if (Startup.enabled) Startup.enabled = true
-        buildMenu()
-        tray = TrayIcon(AppIcon.trayImage(false, lightTaskbar()), "Persian Dictation", menu)
-        tray.isImageAutoSize = true
-        tray.addMouseListener(object : MouseAdapter() {
-            // Rebuilt before the menu opens (it opens on release).
-            override fun mousePressed(e: MouseEvent) = refresh()
-        })
-        // Double-click: start/stop dictating into the app the user was in.
-        tray.addActionListener { toggleFromMenu() }
-        SystemTray.getSystemTray().add(tray)
+        Tray.add(iconImage(), tooltip())
 
         // Ctrl+Alt+Space, like the Mac's ⌃⌥Space.
         toggleRegistered = WinThread.registerHotKey(ID_TOGGLE, WinThread.MOD_CONTROL or WinThread.MOD_ALT, WinThread.VK_SPACE) {
             controller.toggle()
         }
         Log.write("hotkey Ctrl+Alt+Space registered=$toggleRegistered")
-        refresh()
         if (!toggleRegistered) {
-            tray.displayMessage("Ctrl+Alt+Space is taken",
-                "Another app uses Ctrl+Alt+Space. Start dictation from this icon's menu instead.", TrayIcon.MessageType.WARNING)
+            Tray.notify("Ctrl+Alt+Space is taken",
+                "Another app uses Ctrl+Alt+Space. Start dictation from the Persian Dictation icon instead.", Tray.WARNING)
         } else if (!Settings.welcomeShown) {
             Settings.welcomeShown = true
-            tray.displayMessage("Persian Dictation is running",
-                "Press Ctrl+Alt+Space to dictate into any app. Esc or Enter stops. The menu is on this icon.",
-                TrayIcon.MessageType.INFO)
+            Tray.notify("Persian Dictation is running",
+                "Press Ctrl+Alt+Space to dictate into any app; Esc or Enter stops. Click the microphone icon for the menu.")
         }
     }
 
@@ -94,108 +71,123 @@ class App {
         WinThread.registerHotKey(ID_ENTER, 0, WinThread.VK_RETURN) { controller.stopKeyPressed(enter = true) }
     }
 
-    private fun buildMenu() {
-        menu.add(MenuItem("Persian Dictation ${AppVersion.display}").apply { isEnabled = false })
-        menu.add(statusItem)
-        toggleItem.addActionListener { toggleFromMenu() }
-        menu.add(toggleItem)
-        menu.addSeparator()
-        menu.add(microphoneMenu)
-        for ((title, code) in languages) {
-            languageMenu.add(CheckboxMenuItem(title).apply {
-                addItemListener {
-                    Settings.language = code
-                    refresh()
-                }
-            })
+    // Icon
+
+    private fun iconImage(): BufferedImage =
+        AppIcon.trayBitmap(Tray.iconSize(), controller.state != DictationController.State.IDLE, lightTaskbar())
+
+    private fun tooltip() = "Persian Dictation — " + when (controller.state) {
+        DictationController.State.IDLE -> if (toggleRegistered) "Ctrl+Alt+Space to dictate" else "Ready"
+        DictationController.State.LISTENING -> "Listening…"
+        DictationController.State.FINISHING -> "Finishing…"
+    }
+
+    private fun updateIcon() = Tray.update(iconImage(), tooltip())
+
+    // Menu
+
+    private fun showMenu(x: Int, y: Int) {
+        if (menuOpen) return
+        menuOpen = true
+        val entries = menuEntries()
+        WinThread.post {
+            val command = Tray.showMenu(entries, x, y)
+            SwingUtilities.invokeLater {
+                menuOpen = false
+                if (command != 0) runCommand(command)
+            }
         }
-        menu.add(languageMenu)
-        menu.addSeparator()
-        developmentItem.addItemListener { e -> toggleDevelopmentMode(e.stateChange == ItemEvent.SELECTED) }
-        menu.add(developmentItem)
-        menu.add(MenuItem("Open Logs Folder").apply {
-            addActionListener {
+    }
+
+    private fun menuEntries(): List<MenuEntry> {
+        val listening = controller.state != DictationController.State.IDLE
+        val toggle = when (controller.state) {
+            DictationController.State.IDLE -> "Start Dictation\tCtrl+Alt+Space"
+            DictationController.State.LISTENING -> "Stop Dictation\tEsc"
+            DictationController.State.FINISHING -> "Finishing…"
+        }
+        val choice = Settings.microphone
+        val devices = MicCapture.microphones().map { it.name }
+        micNames = devices
+        val microphones = buildList {
+            add(MenuEntry.Item(CMD_MIC_DEFAULT, "System Default", checked = choice == null))
+            if (devices.isNotEmpty()) add(MenuEntry.Separator)
+            devices.forEachIndexed { i, name -> add(MenuEntry.Item(CMD_MIC_FIRST + i, name, checked = name == choice)) }
+            if (devices.isEmpty()) add(MenuEntry.Item(0, "No microphone found", enabled = false))
+            if (choice != null && choice !in devices) {
+                add(MenuEntry.Separator)
+                add(MenuEntry.Item(0, "$choice (not connected — using the default)", enabled = false))
+            }
+        }
+        return buildList {
+            add(MenuEntry.Item(0, "Persian Dictation ${AppVersion.display}", enabled = false))
+            add(MenuEntry.Separator)
+            add(MenuEntry.Item(CMD_TOGGLE, toggle, enabled = controller.state != DictationController.State.FINISHING, isDefault = true))
+            add(MenuEntry.Separator)
+            add(MenuEntry.Submenu("Language: ${languages.first { it.second == Settings.language }.first}",
+                languages.mapIndexed { i, (title, code) -> MenuEntry.Item(CMD_LANGUAGE_FIRST + i, title, checked = code == Settings.language) }))
+            add(MenuEntry.Submenu("Microphone: ${choice ?: "System Default"}", microphones))
+            add(MenuEntry.Separator)
+            if (Startup.available) add(MenuEntry.Item(CMD_STARTUP, "Start with Windows", checked = Startup.enabled))
+            add(MenuEntry.Item(CMD_DEVELOPMENT, "Development Mode (log + record audio)", checked = Settings.developmentMode, enabled = !listening))
+            add(MenuEntry.Item(CMD_LOGS, "Open Logs Folder"))
+            add(MenuEntry.Item(CMD_DIAGNOSTICS, "Share Diagnostics…"))
+            add(MenuEntry.Separator)
+            add(MenuEntry.Item(CMD_QUIT, "Quit Persian Dictation"))
+        }
+    }
+
+    private var micNames: List<String> = emptyList()
+
+    private fun runCommand(command: Int) {
+        when (command) {
+            CMD_TOGGLE -> {
+                // The menu took the focus; give it back to the user's app before dictating into it.
+                if (controller.state == DictationController.State.IDLE) WinThread.restoreForeground()
+                controller.toggle()
+            }
+            CMD_MIC_DEFAULT -> selectMicrophone(null)
+            in CMD_MIC_FIRST until CMD_MIC_FIRST + 100 -> micNames.getOrNull(command - CMD_MIC_FIRST)?.let { selectMicrophone(it) }
+            in CMD_LANGUAGE_FIRST until CMD_LANGUAGE_FIRST + languages.size -> {
+                Settings.language = languages[command - CMD_LANGUAGE_FIRST].second
+                Log.write("language=${Settings.language}")
+            }
+            CMD_STARTUP -> Startup.enabled = !Startup.enabled
+            CMD_DEVELOPMENT -> toggleDevelopmentMode()
+            CMD_LOGS -> {
                 AppPaths.data.mkdirs()
                 Runtime.getRuntime().exec(arrayOf("explorer.exe", AppPaths.data.path))
             }
-        })
-        menu.add(MenuItem("Share Diagnostics…").apply { addActionListener { shareDiagnostics() } })
-        if (Startup.available) {
-            startupItem.addItemListener { e ->
-                Startup.enabled = e.stateChange == ItemEvent.SELECTED
-                refresh()
-            }
-            menu.add(startupItem)
-        }
-        menu.addSeparator()
-        menu.add(MenuItem("Quit Persian Dictation").apply { addActionListener { quit() } })
-    }
-
-    /** The tray menu took the focus; give it back to the user's app before dictating into it. */
-    private fun toggleFromMenu() {
-        if (controller.state == DictationController.State.IDLE) WinThread.restoreForeground()
-        controller.toggle()
-    }
-
-    /** "System Default" follows the Windows default input; a chosen device sticks while connected. */
-    private fun buildMicrophoneMenu() {
-        microphoneMenu.removeAll()
-        val choice = Settings.microphone
-        val devices = MicCapture.microphones().map { it.name }
-        fun item(title: String, value: String?) = CheckboxMenuItem(title, value == choice).apply {
-            addItemListener {
-                Settings.microphone = value
-                Log.write("microphone choice: $title")
-                controller.microphonePreferenceChanged()
-                refresh()
-            }
-        }
-        microphoneMenu.add(item("System Default", null))
-        microphoneMenu.addSeparator()
-        devices.forEach { microphoneMenu.add(item(it, it)) }
-        if (choice != null && choice !in devices) {
-            microphoneMenu.add(MenuItem("Chosen microphone not connected — using the default").apply { isEnabled = false })
-        }
-        microphoneMenu.label = "Microphone: ${choice ?: "System Default"}"
-    }
-
-    private fun refresh() {
-        val listening = controller.state != DictationController.State.IDLE
-        tray.image = AppIcon.trayImage(listening, lightTaskbar())
-        statusItem.label = when (controller.state) {
-            DictationController.State.IDLE -> if (toggleRegistered) "Ready" else "Ready (Ctrl+Alt+Space is used by another app)"
-            DictationController.State.LISTENING -> "Listening…"
-            DictationController.State.FINISHING -> "Finishing…"
-        }
-        tray.toolTip = "Persian Dictation — ${statusItem.label}"
-        toggleItem.label = if (listening) "Stop Dictation   Esc / Enter" else "Start Dictation   Ctrl+Alt+Space"
-        buildMicrophoneMenu()
-        developmentItem.state = Settings.developmentMode
-        startupItem.state = Startup.enabled
-        for (i in 0 until languageMenu.itemCount) {
-            (languageMenu.getItem(i) as CheckboxMenuItem).state = languages[i].second == Settings.language
+            CMD_DIAGNOSTICS -> shareDiagnostics()
+            CMD_QUIT -> quit()
         }
     }
 
-    private fun toggleDevelopmentMode(on: Boolean) {
-        if (on && !Settings.developmentMode) {
-            val owner = JFrame().apply { isUndecorated = true; isAlwaysOnTop = true; setLocationRelativeTo(null); isVisible = true }
-            val answer = JOptionPane.showConfirmDialog(
-                owner,
-                "Development Mode saves a recording of everything you dictate and the recognized text in\n" +
-                    "${AppPaths.data} (kept for 7 days). This may include private or confidential\n" +
-                    "information. Use it only for troubleshooting.",
-                "Turn on Development Mode?", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE,
+    private fun selectMicrophone(name: String?) {
+        Settings.microphone = name
+        Log.write("microphone choice: ${name ?: "System Default"}")
+        controller.microphonePreferenceChanged()
+    }
+
+    private fun toggleDevelopmentMode() {
+        if (Settings.developmentMode) {
+            Settings.developmentMode = false
+            Log.write("developmentMode=false")
+            return
+        }
+        // The message box has its own message loop; keep it off the EDT and the Win32 thread.
+        Thread {
+            val ok = Tray.confirm(
+                "Turn on Development Mode?",
+                "Development Mode saves a recording of everything you dictate and the recognized text in " +
+                    "${AppPaths.data} (kept for 7 days). This may include private or confidential information.\n\n" +
+                    "Use it only for troubleshooting.",
             )
-            owner.dispose()
-            if (answer != JOptionPane.OK_OPTION) {
-                refresh()
-                return
+            if (ok) SwingUtilities.invokeLater {
+                Settings.developmentMode = true
+                Log.write("developmentMode=true")
             }
-        }
-        Settings.developmentMode = on
-        Log.write("developmentMode=$on")
-        refresh()
+        }.start()
     }
 
     private fun shareDiagnostics() {
@@ -205,7 +197,7 @@ class App {
                 Runtime.getRuntime().exec(arrayOf("explorer.exe", "/select,", zip.path))
             } catch (e: Exception) {
                 Log.write("diagnostics export failed: $e")
-                tray.displayMessage("Could not create the diagnostics file", e.message ?: e.toString(), TrayIcon.MessageType.ERROR)
+                Tray.notify("Could not create the diagnostics file", e.message ?: e.toString(), Tray.ERROR)
             }
         }.start()
     }
@@ -213,8 +205,8 @@ class App {
     private fun quit() {
         Log.write("quit")
         controller.shutdown()
-        SystemTray.getSystemTray().remove(tray)
-        // Give a pending paste's clipboard restore no chance to be lost: render anything we still own.
+        Tray.remove()
+        // Hand over any paste text we still own on the clipboard.
         WinThread.sync { Paster.renderAll() }
         exitProcess(0)
     }
@@ -228,6 +220,16 @@ class App {
         private const val ID_TOGGLE = 1
         private const val ID_ESCAPE = 2
         private const val ID_ENTER = 3
+
+        private const val CMD_TOGGLE = 1
+        private const val CMD_STARTUP = 2
+        private const val CMD_DEVELOPMENT = 3
+        private const val CMD_LOGS = 4
+        private const val CMD_DIAGNOSTICS = 5
+        private const val CMD_QUIT = 6
+        private const val CMD_MIC_DEFAULT = 99
+        private const val CMD_MIC_FIRST = 100
+        private const val CMD_LANGUAGE_FIRST = 300
 
         fun pruneRecordings() = WavRecorder.pruneOld(AppPaths.recordings)
     }
