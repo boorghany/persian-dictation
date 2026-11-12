@@ -8,3 +8,4 @@ android/signing/
 # Windows app: build output and packaged zips.
 windows/build/
 windows/dist/
+testdata/private-recordings/

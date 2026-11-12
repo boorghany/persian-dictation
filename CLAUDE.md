@@ -6,7 +6,7 @@ share one design:
 
 - **macOS** (Swift, repo root): menu-bar app; press a hotkey, speak, text is pasted into any app.
 - **Android** (Kotlin, `android/`): a voice-only keyboard (IME) used *next to* Gboard, so Gboard's swipe
-  typing and clipboard history stay available. The user's phone: Xiaomi Poco X6 Pro, latest HyperOS.
+  typing and clipboard history stay available. The user's phone runs HyperOS.
 - **Windows** (Kotlin/JVM, `windows/`, since 2026-11-08): notification-area app like the Mac one; it runs the
   Android `core` engine unchanged, so there is no third port of the workarounds.
 
@@ -28,13 +28,14 @@ Personal use at first; since 2026-10-19 the Android app is also being published 
 - **Commit every change** to the local git repo (branch `main`, created 2026-10-08) after it builds and its
   tests/replays pass: one commit per change, message says what and why, version in the subject when bumped.
   Build output, APKs (`android/dist/`), `local.properties` and caches are git-ignored.
-- **Push after every commit** to GitHub (`origin` = private repo `boorghany/persian-dictation`; the user asked
+- **Push after every commit** to GitHub (`origin` = `boorghany/persian-dictation`; the user asked
   on 2026-10-27).
-- **GitHub:** private repo `boorghany/persian-dictation` (`origin`, over SSH; `gh` is signed in as boorghany),
-  `main` first pushed 2026-10-27 at the user's request. Push `main` after merging. Keep secrets and personal data out
-  of commits. The user may make it public later; before that, review with the user: `testdata/recordings/*.wav` are the user's own voice and dictated
-  text; this file mentions their phone, location/VPN and headset; the Chromium key is public but unofficial
-  use of Google's endpoint should be explained in a README; add a LICENSE.
+- **GitHub:** repo `boorghany/persian-dictation` (`origin`, over SSH; `gh` is signed in as boorghany), made
+  **public** on 2026-11-12 (MIT `LICENSE`, `README.md` explains the unofficial Google endpoint). Push `main` after
+  merging. **Everything committed is public:** keep secrets, personal data, business names and work content out of
+  code, docs, commit messages and recordings. Before committing a new test recording, check what was said in it
+  (replay it); recordings with private content stay in the git-ignored `testdata/private-recordings/`. Two such
+  recordings were removed from the whole history with `git filter-repo` before going public (2026-11-12).
 - **GitHub releases** (the user asked on 2026-11-12; first one: `v1.0.4`): one release holds the latest build of
   all three apps. Tag `v<highest version among the three>` on `main` (the apps' versions differ; the title names each,
   e.g. "Persian Dictation — Windows 1.0.4, Android 1.0.2, macOS 1.0.1"). Use builds that are already made and match
@@ -74,8 +75,8 @@ was ruled out: private, needs app impersonation, fragile.
 - **The down request must reach Google before the up request**, or the session silently returns nothing.
   Google sends no down response headers until the up arrives (so you can't wait for them).
 - Google accepts audio **faster than real time** (12 s of audio sent in a burst → final in ~2 s).
-- The user's network goes through a **VPN** (Iran). Google's Android SDK/Maven servers returned 404 on one
-  VPN exit; switching location fixed it. Through the VPN, new TLS handshakes sometimes stall 4–10 s.
+- The user's network goes through a **VPN**. Google's Android SDK/Maven servers returned 404 on one
+  VPN exit; switching exits fixed it. Through the VPN, new TLS handshakes sometimes stall 4–10 s.
 
 ## Workarounds for Google bugs (both apps, `ContinuousRecognizer` + helpers)
 
@@ -301,9 +302,8 @@ Dev mode (switch in the setup screen, default off, confirmation dialog before tu
 holds `PersianDictation.log` (+ connection traces) and `recordings/`. Test hook: if `test-input.wav`
 exists there, it is played instead of the microphone (used for emulator tests; delete it afterwards).
 
-**Cafe Bazaar** (2026-10-19, the user asked for it): developer account boorghany@gmail.com, developer title
-احمد بورقانی, draft app 225251 at pishkhan.cafebazaar.ir. Listing: name تایپ صوتی فارسی / Persian Dictation, category
-ابزارها, free, support email boorghany@gmail.com; texts say audio goes to Google only while listening and that it is not a
+**Cafe Bazaar** (2026-10-19, the user asked for it): the user's developer account, draft app 225251 at pishkhan.cafebazaar.ir. Listing: name تایپ صوتی فارسی / Persian Dictation, category
+ابزارها, free; texts say audio goes to Google only while listening and that it is not a
 Google product. `applicationId` is **`ir.boorghany.persiandictation`** (permanent once published; the Kotlin package /
 namespace stays `local.voice2text…`, so component names are `ir.boorghany.persiandictation/local.voice2text.persiandictation.X`).
 `android/build.sh --release` builds `dist/…-release.apk` signed with `android/signing/release.jks`
@@ -337,8 +337,8 @@ then `adb shell ime enable/set ir.boorghany.persiandictation/local.voice2text.pe
 Status (2026-10-07): build 3 passes all replays and an emulator end-to-end test (recording played in,
 text landed in the field with correct spacing/ZWNJ, ✓ returned to Gboard). 2026-10-08: the user has been
 using it on the phone (an older build) and reported bad bugs; get their logs via Share diagnostics (0.3.0+)
-or wireless adb. Before that: **not yet on the user's phone** — they took the APK to install via Telegram Saved Messages. For future updates, wireless adb
-is recommended: HyperOS Developer options → USB debugging + **Install via USB** (needs Mi account) +
+or wireless adb. Before that: **not yet on the user's phone** — they installed the APK by hand. For future updates, wireless adb
+is recommended: HyperOS Developer options → USB debugging + **Install via USB** (needs the phone's account) +
 Wireless debugging → pair with code (`adb pair IP:PORT CODE`, then `adb connect`). Real-mic and HyperOS
 behaviour are untested.
 
@@ -376,7 +376,7 @@ installed once under `%LOCALAPPDATA%\PersianDictationBuild`, `jpackage --type ap
 Setup.exe; all copied to `windows/dist/` (git-ignored). `--install` runs the Setup silently (`/MERGETASKS=!startup`) and
 launches the app. A full build takes ~10 min (Inno's compression under emulation): run it in the background.
 
-VM etiquette and tools: the VM is the user's (they use Word in it); keep tests short, close what you open. Every
+VM etiquette and tools: the VM is the user's and they use it; keep tests short, close what you open. Every
 `prlctl exec` console command opens a Windows Terminal window titled `prl_tools_service.exe` that takes the focus (it
 closes menus and flyouts; wait ~3 s after starting before clicking); `conhost --headless` doesn't work there. Pass scripts
 as `-EncodedCommand` (UTF-16LE base64) and send output to a UTF-8 file in the staging folder (console output turns
@@ -392,7 +392,7 @@ were unreliable; click items instead. Running a scenario as `-File` directly wit
 
 Tests 2026-11-09 (1.0.4, ARM64 VM, real Google): regression recordings through `test-input.wav` into the text box —
 05-55-36-first12s, dropped-tail (6 shown words kept, «…دیکتیشن؟ الان یه چیز بی‌ربط»), repeated-final (typed once),
-05-54-38 (57 s, 8 finals) all exact; clipboard restored every time. Keyboard: Ctrl+Alt+Space starts, spoken «اینتر»
+a 57 s private recording (8 finals) all exact; clipboard restored every time. Keyboard: Ctrl+Alt+Space starts, spoken «اینتر»
 presses Enter and keeps listening, Esc stops, Enter stops, Enter Enter sends after the last paste. Menu: Start Dictation
 pastes into the previous app, Esc-closed menu then hotkey pastes into the app, Language and Microphone items, Start with
 Windows on/off (Run value with the exe path), Quit removes the icon. Real microphone: the device is listed and a room
@@ -429,8 +429,10 @@ Regression set in `testdata/recordings/` — expected finals (both engines must 
 | `2026-10-27T06-03-36Z-dropped-tail.wav` | اسم پوشه پروژه رو هم روی این سیستم می‌تونی تغییر بدی به همین پرشین دیکتیشن علامت سوال الان یه چیز بی‌ربط (≤ 0.25.0: without the last 6 words) |
 | `2026-10-27T06-03-36Z-dropped-tail-repeated.wav` (+ the next session, where the user said the tail again) | the same, then nothing (the repeat is removed as an echo) |
 
-Recordings 05-55-36, 05-54-38 and 05-52-37 reproduce the clipped-start bug and 06-00-38 the freeze when
-replayed in a single continuous session; the old buggy outputs were ی‌خوام, مونه, و, and a lost sentence.
+Recordings 05-55-36 and 05-52-37 reproduce the clipped-start bug when replayed in a single continuous session
+(old buggy outputs ی‌خوام, مونه, و). Two more recordings with private content (a 57 s one with 8 finals that showed
+the clipped start, and one that reproduced the freeze) are kept outside git in `testdata/private-recordings/`
+(git-ignored, only on the user's Mac); use them too when they're there.
 
 ## Open ideas
 
