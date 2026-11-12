@@ -35,6 +35,22 @@ Personal use at first; since 2026-10-19 the Android app is also being published 
   of commits. The user may make it public later; before that, review with the user: `testdata/recordings/*.wav` are the user's own voice and dictated
   text; this file mentions their phone, location/VPN and headset; the Chromium key is public but unofficial
   use of Google's endpoint should be explained in a README; add a LICENSE.
+- **GitHub releases** (the user asked on 2026-11-12; first one: `v1.0.4`): one release holds the latest build of
+  all three apps. Tag `v<highest version among the three>` on `main` (the apps' versions differ; the title names each,
+  e.g. "Persian Dictation — Windows 1.0.4, Android 1.0.2, macOS 1.0.1"). Use builds that are already made and match
+  the committed code (check `git log` since each app's last build commit); build only if an app changed since.
+  Assets, named `PersianDictation-<version>-build<N>-<platform>.<ext>`:
+  - Windows: `windows/dist/…-Setup.exe` and the `-windows-x64.zip` / `-windows-arm64.zip` portable zips, as they are.
+  - Android: the **release-signed** APK `android/dist/…-release.apk`, renamed `…-android.apk` (never a debug build).
+  - Mac: `ditto -c -k --sequesterRsrc --keepParent "build.noindex/Persian Dictation.app" …-macOS-arm64.zip`
+    (check `CFBundleVersion` = `build-number.txt`; the binary is arm64 only).
+  - Stage renamed files in the scratchpad, not the repo. Then
+    `gh release create v<X> --target main --title "…" --notes-file notes.md <files…>` and check with
+    `gh release view v<X> --json assets` that every asset says `uploaded`.
+  - Notes (English): a table of platform / version (build) / file, what's new per app since the previous release, and
+    install notes: Windows installer is unsigned (SmartScreen → More info → Run anyway); Mac app is self-signed, not
+    notarized (right-click → Open, or `xattr -dr com.apple.quarantine "/Applications/Persian Dictation.app"`), needs
+    Microphone + Accessibility, Apple Silicon, macOS 13+; audio goes to Google only while listening, not a Google product.
 - **Development mode** (verbose log + a WAV recording of every Google session) is **off by default** since
   0.17.0 (the user's request, for other people installing it); turning it on first warns that private speech
   and text are saved. Without it, the log must not contain dictated text. To debug, ask the user to turn it on.
